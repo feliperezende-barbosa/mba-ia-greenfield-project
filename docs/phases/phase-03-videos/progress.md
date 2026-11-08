@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 4/13 completed
+**SIs:** 5/13 completed
 
 ### SI-03.1 — Infra: ffmpeg, MinIO, Redis, dependências, configuração e suporte de testes
 - **Status:** completed
@@ -46,9 +46,13 @@
   - `removeOnComplete` / `removeOnFail` counts are named constants (`VIDEO_PROCESSING_REMOVE_ON_COMPLETE_COUNT` = 1000, `VIDEO_PROCESSING_REMOVE_ON_FAIL_COUNT` = 5000) beyond the four constants listed in the plan.
 
 ### SI-03.5 — Pré-cadastro do vídeo como rascunho (POST /videos)
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 33/33 passing (upload-plan.util.spec.ts, video-title.util.spec.ts, videos.service.spec.ts, videos.service.integration-spec.ts, channels.service.integration-spec.ts, test/videos-upload.e2e-spec.ts)
+- **Observations:**
+  - Added `test/videos-upload.e2e-spec.ts` (not listed in the plan, which defers the HTTP E2E to SI-03.12): the testing guide requires an E2E for every controller/DTO, so the `POST /videos` contract (201 shape, 400 validation, 401, 404 `CHANNEL_NOT_FOUND`) is proven here; SI-03.6/03.7 extend this file. `ThrottlerStorage` is cleared in `beforeEach` (10 req/min global limit).
+  - `deriveTitle` falls back to `"Untitled video"` for a whitespace-only filename (not in the plan) so the `title NOT NULL` column never receives an empty title. New constants `VIDEO_TITLE_MAX_LENGTH` (100) and `VIDEO_FILENAME_MAX_LENGTH` (255) in `videos.constants.ts`.
+  - `VideosModule` imports `ChannelsModule` + `StorageModule`; `AppModule` already imported `VideosModule` since SI-03.2.
+  - `ChannelsService.getByUserId` uses `dataSource.getRepository(Channel)` (the service only depends on `DataSource`). `channels.service.ts` still carries the pre-existing `no-unsafe-*` lint errors in `isPgUniqueViolationOnColumn` (untouched).
 
 ### SI-03.6 — URLs pré-assinadas de partes (POST /videos/:publicId/upload/part-urls)
 - **Status:** pending

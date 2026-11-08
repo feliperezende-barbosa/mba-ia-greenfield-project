@@ -48,3 +48,9 @@ export class TokenReuseDetectedException extends DomainException {
     );
   }
 }
+
+export class ChannelNotFoundException extends DomainException {
+  constructor() {
+    super('CHANNEL_NOT_FOUND', 404, 'Channel not found');
+  }
+}

@@ -13,3 +13,6 @@ export const VIDEO_CONTENT_TYPE_EXTENSIONS = {
 } as const;
 
 export type VideoContentType = keyof typeof VIDEO_CONTENT_TYPE_EXTENSIONS;
+
+export const VIDEO_TITLE_MAX_LENGTH = 100;
+export const VIDEO_FILENAME_MAX_LENGTH = 255;
