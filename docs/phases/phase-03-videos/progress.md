@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 11/13 completed
+**SIs:** 12/13 completed
 
 ### SI-03.1 — Infra: ffmpeg, MinIO, Redis, dependências, configuração e suporte de testes
 - **Status:** completed
@@ -113,9 +113,14 @@
   - Controller e2e cases are an addition to the plan's Tests table (controllers are covered through e2e only).
 
 ### SI-03.12 — Pipeline ponta a ponta: upload, worker, streaming e download (E2E)
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** `test/video-pipeline.e2e-spec.ts` 3/3 passing (run twice, stable)
+- **Observations:**
+  - Real stack end to end: API (`AppModule` + `main.ts` pipes/filters) → presigned part `PUT`s straight to MinIO (`S3_PUBLIC_ENDPOINT` overridden to `http://minio:9000` by `src/test/test-env.ts`) → `completion` (202) → `GET` shows `processing` and `stream` answers 409 `VIDEO_NOT_READY` → only then `startTestWorker(queuePrefix)` (a `VideoWorkerModule` context in the test process with the run's unique `QUEUE_PREFIX`, independent of the Compose `video-worker` that consumes the default `bull` prefix) → `ready` with duration (> 4 s of a 5 s clip), `h264` 640×480 metadata and a `thumbnailUrl` whose bytes start with the JPEG signature → `stream` 302 → `Range: bytes=0-99` on the presigned URL returns `206`, `Content-Range: bytes 0-99/{size}` and the first 100 bytes of the file → `download` 302 → 200 with `Content-Disposition: attachment; filename="Pipeline test.mp4"` and bytes identical to the upload.
+  - Multi-part: the upload plan is fixed at 64 MiB parts (`UPLOAD_PART_SIZE_BYTES`, not configurable), so the test declares `sizeBytes = 2 × 64 MiB + 1` to get a 3-part plan from the API and uploads the real ≥ 11 MiB noise clip as 3 parts of 5 MiB, 5 MiB and the rest (MinIO only enforces the 5 MiB minimum on non-last parts; the declared size is a planning input, the stored object size is the real one). The plan's "2 × ≥ 5 MiB + resto" shape is therefore met; the 64 MiB part size itself is covered by `upload-plan.util.spec.ts`.
+  - Throttler: the `http()` helper clears the `ThrottlerStorage` before every request (stricter than "between the flow steps"), plus `beforeEach`, so the 10 req/min global limit never interferes.
+  - Also covered: text file as `video/mp4` → `error` with `INVALID_MEDIA…`, `thumbnailUrl` null and stream 409; two sequential videos get distinct `publicId` and distinct stream `Location`.
+  - New `src/test/worker-test-helpers.ts` (`startTestWorker`, `waitForVideoStatus`); lint-clean, `tsc --noEmit` exit 0.
 
 ### SI-03.13 — Contrato OpenAPI, exemplos `api.http` e documentação
 - **Status:** pending
