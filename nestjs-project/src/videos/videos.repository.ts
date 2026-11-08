@@ -73,6 +73,10 @@ export class VideosRepository {
     }
   }
 
+  async findById(id: string): Promise<Video | null> {
+    return this.repository.findOne({ where: { id } });
+  }
+
   async findByPublicId(publicId: string): Promise<Video | null> {
     return this.repository.findOne({ where: { public_id: publicId } });
   }

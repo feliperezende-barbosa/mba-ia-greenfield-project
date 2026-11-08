@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 8/13 completed
+**SIs:** 9/13 completed
 
 ### SI-03.1 — Infra: ffmpeg, MinIO, Redis, dependências, configuração e suporte de testes
 - **Status:** completed
@@ -83,9 +83,17 @@
   - No module-compilation test was added for `MediaModule` (single provider, no configured imports; DI wiring is exercised by the integration spec).
 
 ### SI-03.9 — Video worker: processor BullMQ, idempotência e tratamento de falha
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 25/25 passing (video-processing.service.spec.ts 17, video-processing.service.integration-spec.ts 5, video-worker.integration-spec.ts 3) + 1 new `findById` test in videos.repository.integration-spec.ts
+- **Observations:**
+  - Added `VideosRepository.findById(id)` (the plan's `process(videoId)` loads by internal id; only `findByPublicId` existed) with an integration test.
+  - `VideoWorkerModule` also registers `TypeOrmModule.forFeature([User])`: `Channel` has a relation to `User`, so without it TypeORM cannot build the metadata in a context that does not import `AuthModule`/`UsersModule`. Not in the plan text. The worker reuses `envValidationSchema`, so it needs the same required variables as the API (`JWT_*` included) — it reads the project `.env` through the mounted volume, like `nestjs-api`.
+  - `@nestjs/bullmq` applies the `QUEUE_PREFIX` of `BullModule.forRootAsync` to the `@Processor` worker too: the worker integration spec runs the whole `VideoWorkerModule` under a unique prefix and consumes only its own jobs.
+  - **Test isolation vs. the running worker:** the Compose `video-worker` consumes the default `bull` prefix; every suite that touches the queue (producer, videos service, worker, e2e) sets a unique `QUEUE_PREFIX` and obliterates its queue, so a live worker can never steal test jobs and tests never need it stopped. Suites that wipe DB tables (`cleanAllTables`) do not affect an idle worker.
+  - Added `src/test/wait-for.ts` (polling helper) for the asynchronous worker assertions. `INVALID_MEDIA:` / `PROCESSING_FAILED:` prefixes live in `video-worker.constants.ts`. A missing video throws `UnrecoverableError` (the failed handler then finds no `processing` row and is a no-op).
+  - `compose.yaml` `video-worker` uses the same `Dockerfile.dev` build, the `.:/home/node/app` volume, `depends_on` db/redis/minio `service_healthy` and `restart: unless-stopped`; `command` is `bash -c 'until [ -x node_modules/.bin/nest ]; …; exec npm run start:worker:dev'`. Scripts `start:worker` / `start:worker:dev` added to `package.json`.
+  - Live verification: `docker compose up -d video-worker` → log `Video worker started, waiting for jobs`; a script (deleted afterwards) put a generated MP4 in MinIO, set the row to `processing` and enqueued through `VideoProcessingProducer` on the default `bull` prefix → the running worker moved the row to `ready` in ~150 ms (`duration_seconds` 3, metadata, `thumbnail_key` `videos/{publicId}/thumbnail.jpg`, thumbnail object of 37313 bytes in MinIO). `docker compose up -d --scale video-worker=2 video-worker` started two replicas (both logged the startup line); scaled back to 1.
+  - Known caveat (not changed): `nest-cli.json` has `deleteOutDir: true` and both the API (`start:dev`) and the worker (`start:worker:dev`) compile into the same `dist/` through the shared mounted volume; concurrently starting two watch builds can briefly wipe each other's output. Not an issue for tests (ts-jest) or when only one of them is running; a separate `outDir` for the worker is a candidate follow-up.
 
 ### SI-03.10 — Leitura do vídeo pelo dono (GET /videos/:publicId)
 - **Status:** pending

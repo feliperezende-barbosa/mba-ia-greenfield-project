@@ -119,6 +119,22 @@ describe('VideosRepository (integration)', () => {
     });
   });
 
+  describe('findById', () => {
+    it('should find a video by its internal id and return null when unknown', async () => {
+      const channel = await createTestChannel(dataSource);
+      const draft = await videosRepository.createDraft(
+        buildDraftInput(channel.id),
+      );
+
+      const found = await videosRepository.findById(draft.id);
+
+      expect(found?.public_id).toBe(draft.public_id);
+      expect(
+        await videosRepository.findById('00000000-0000-4000-8000-000000000000'),
+      ).toBeNull();
+    });
+  });
+
   describe('findByPublicId / findOwnedByPublicId', () => {
     it('should find a video by its public_id', async () => {
       const channel = await createTestChannel(dataSource);

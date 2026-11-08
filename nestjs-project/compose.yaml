@@ -17,6 +17,25 @@ services:
       redis:
         condition: service_healthy
 
+  video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command:
+      - bash
+      - -c
+      - until [ -x node_modules/.bin/nest ]; do echo 'waiting for node_modules...'; sleep 2; done; exec npm run start:worker:dev
+    volumes:
+      - .:/home/node/app
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   minio:
     image: chainguard/minio:latest
     command: server /data --console-address ":9001"

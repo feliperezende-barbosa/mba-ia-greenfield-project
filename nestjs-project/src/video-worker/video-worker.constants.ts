@@ -1,0 +1,3 @@
+export const INVALID_MEDIA_PREFIX = 'INVALID_MEDIA:';
+export const PROCESSING_FAILED_PREFIX = 'PROCESSING_FAILED:';
+export const THUMBNAIL_CONTENT_TYPE = 'image/jpeg';
