@@ -6,6 +6,11 @@ import { DataSource } from 'typeorm';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { ChannelsService } from '../channels/channels.service';
+import {
+  InvalidPartNumberException,
+  VideoNotFoundException,
+  VideoNotInDraftException,
+} from '../common/exceptions/domain.exception';
 import { Channel } from '../channels/entities/channel.entity';
 import storageConfig from '../config/storage.config';
 import { S3_INTERNAL_CLIENT } from '../storage/storage.constants';
@@ -15,7 +20,10 @@ import {
   cleanAllTables,
   createTestDataSource,
 } from '../test/create-test-data-source';
-import { deleteKeys } from '../test/storage-test-helpers';
+import {
+  deleteKeys,
+  putPartsViaPresignedUrls,
+} from '../test/storage-test-helpers';
 import { createTestChannel } from '../test/video-test-data';
 import { User } from '../users/entities/user.entity';
 import { Video } from './entities/video.entity';
@@ -153,6 +161,94 @@ describe('VideosService (integration)', () => {
       ).rejects.toBe(failure);
 
       expect(await dataSource.getRepository(Video).count()).toBe(0);
+    });
+  });
+
+  describe('getPartUrls', () => {
+    it('should return URLs that accept real part bytes and answer an ETag', async () => {
+      const channel = await createTestChannel(dataSource);
+      const draft = await service.createDraft(channel.user_id, {
+        filename: 'aula.mp4',
+        contentType: 'video/mp4',
+        sizeBytes: 5 * MIB,
+      });
+      createdKeys.push(`videos/${draft.publicId}/original.mp4`);
+
+      const { expiresInSeconds, urls } = await service.getPartUrls(
+        channel.user_id,
+        draft.publicId,
+        { partNumbers: [1] },
+      );
+
+      expect(expiresInSeconds).toBe(3600);
+      expect(urls).toHaveLength(1);
+      const publicEndpoint = new URL(
+        module.get<ConfigType<typeof storageConfig>>(storageConfig.KEY)
+          .publicEndpoint,
+      );
+      expect(new URL(urls[0].url).host).toBe(publicEndpoint.host);
+      const parts = await putPartsViaPresignedUrls(
+        urls,
+        new Map([[1, Buffer.alloc(MIB, 7)]]),
+      );
+      expect(parts).toHaveLength(1);
+      expect(parts[0].partNumber).toBe(1);
+      expect(parts[0].etag).toBeTruthy();
+    });
+
+    it('should reject a part number above the planned part count', async () => {
+      const channel = await createTestChannel(dataSource);
+      const draft = await service.createDraft(channel.user_id, {
+        filename: 'aula.mp4',
+        contentType: 'video/mp4',
+        sizeBytes: MIB,
+      });
+      createdKeys.push(`videos/${draft.publicId}/original.mp4`);
+
+      await expect(
+        service.getPartUrls(channel.user_id, draft.publicId, {
+          partNumbers: [2],
+        }),
+      ).rejects.toBeInstanceOf(InvalidPartNumberException);
+    });
+
+    it('should hide the video of another channel as not found', async () => {
+      const owner = await createTestChannel(dataSource);
+      const stranger = await createTestChannel(dataSource);
+      const draft = await service.createDraft(owner.user_id, {
+        filename: 'aula.mp4',
+        contentType: 'video/mp4',
+        sizeBytes: MIB,
+      });
+      createdKeys.push(`videos/${draft.publicId}/original.mp4`);
+
+      await expect(
+        service.getPartUrls(stranger.user_id, draft.publicId, {
+          partNumbers: [1],
+        }),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+
+    it('should reject a video that already left draft', async () => {
+      const channel = await createTestChannel(dataSource);
+      const draft = await service.createDraft(channel.user_id, {
+        filename: 'aula.mp4',
+        contentType: 'video/mp4',
+        sizeBytes: MIB,
+      });
+      createdKeys.push(`videos/${draft.publicId}/original.mp4`);
+      await dataSource
+        .getRepository(Video)
+        .update(
+          { public_id: draft.publicId },
+          { status: VideoStatus.PROCESSING },
+        );
+
+      await expect(
+        service.getPartUrls(channel.user_id, draft.publicId, {
+          partNumbers: [1],
+        }),
+      ).rejects.toBeInstanceOf(VideoNotInDraftException);
     });
   });
 });

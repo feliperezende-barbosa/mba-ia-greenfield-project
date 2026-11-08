@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 5/13 completed
+**SIs:** 6/13 completed
 
 ### SI-03.1 — Infra: ffmpeg, MinIO, Redis, dependências, configuração e suporte de testes
 - **Status:** completed
@@ -55,9 +55,12 @@
   - `ChannelsService.getByUserId` uses `dataSource.getRepository(Channel)` (the service only depends on `DataSource`). `channels.service.ts` still carries the pre-existing `no-unsafe-*` lint errors in `isPgUniqueViolationOnColumn` (untouched).
 
 ### SI-03.6 — URLs pré-assinadas de partes (POST /videos/:publicId/upload/part-urls)
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 27/27 passing (videos.service.spec.ts, videos.service.integration-spec.ts — 19 tests together incl. SI-03.5 —, test/videos-upload.e2e-spec.ts part-urls block 8 tests)
+- **Observations:**
+  - The listed unit/integration tests are complemented by 8 HTTP E2E cases in `test/videos-upload.e2e-spec.ts` (200 + real `PUT` with `ETag`, `INVALID_PART_NUMBER`, `VALIDATION_ERROR` for empty/duplicate/zero, identical 404 for unknown vs foreign video, 409, 401).
+  - Ownership resolution (`getOwnedVideo`/`getOwnedDraft`) is a private service helper shared with SI-03.7; a user without a channel gets `CHANNEL_NOT_FOUND` (404) there, consistent with `ChannelsService.getByUserId`.
+  - A draft with `upload_id = null` (impossible through the API, since the response is only sent after `setUploadId`) throws a plain `Error` (500) instead of a domain error.
 
 ### SI-03.7 — Conclusão do upload e publicação do job (POST /videos/:publicId/upload/completion)
 - **Status:** pending

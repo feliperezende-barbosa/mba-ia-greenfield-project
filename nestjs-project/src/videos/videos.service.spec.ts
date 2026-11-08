@@ -1,6 +1,11 @@
 import { Test } from '@nestjs/testing';
 import { ChannelsService } from '../channels/channels.service';
-import { ChannelNotFoundException } from '../common/exceptions/domain.exception';
+import {
+  ChannelNotFoundException,
+  InvalidPartNumberException,
+  VideoNotFoundException,
+  VideoNotInDraftException,
+} from '../common/exceptions/domain.exception';
 import { StorageService } from '../storage/storage.service';
 import { Video } from './entities/video.entity';
 import { VideoStatus } from './video-status.enum';
@@ -26,9 +31,14 @@ function buildVideo(overrides: Partial<Video> = {}): Video {
 describe('VideosService', () => {
   let service: VideosService;
   let videosRepository: jest.Mocked<
-    Pick<VideosRepository, 'createDraft' | 'setUploadId' | 'deleteById'>
+    Pick<
+      VideosRepository,
+      'createDraft' | 'setUploadId' | 'deleteById' | 'findOwnedByPublicId'
+    >
   >;
-  let storage: jest.Mocked<Pick<StorageService, 'createMultipartUpload'>>;
+  let storage: jest.Mocked<
+    Pick<StorageService, 'createMultipartUpload' | 'presignUploadPartUrls'>
+  >;
   let channelsService: jest.Mocked<Pick<ChannelsService, 'getByUserId'>>;
 
   beforeEach(async () => {
@@ -36,9 +46,11 @@ describe('VideosService', () => {
       createDraft: jest.fn().mockResolvedValue(buildVideo()),
       setUploadId: jest.fn().mockResolvedValue(undefined),
       deleteById: jest.fn().mockResolvedValue(undefined),
+      findOwnedByPublicId: jest.fn(),
     };
     storage = {
       createMultipartUpload: jest.fn().mockResolvedValue('upload-1'),
+      presignUploadPartUrls: jest.fn(),
     };
     channelsService = {
       getByUserId: jest.fn().mockResolvedValue({ id: CHANNEL_ID }),
@@ -134,6 +146,76 @@ describe('VideosService', () => {
 
       expect(videosRepository.createDraft).not.toHaveBeenCalled();
       expect(storage.createMultipartUpload).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getPartUrls', () => {
+    const draft = buildVideo({ upload_id: 'upload-1', part_count: 3 });
+
+    beforeEach(() => {
+      videosRepository.findOwnedByPublicId.mockResolvedValue(draft);
+      storage.presignUploadPartUrls.mockResolvedValue([
+        { partNumber: 1, url: 'http://storage/1' },
+        { partNumber: 3, url: 'http://storage/3' },
+      ]);
+    });
+
+    it('should presign the requested parts of the owned draft', async () => {
+      const result = await service.getPartUrls(USER_ID, 'AbCdEfGh_-1', {
+        partNumbers: [1, 3],
+      });
+
+      expect(videosRepository.findOwnedByPublicId).toHaveBeenCalledWith(
+        'AbCdEfGh_-1',
+        CHANNEL_ID,
+      );
+      expect(storage.presignUploadPartUrls).toHaveBeenCalledWith(
+        'videos/AbCdEfGh_-1/original.mp4',
+        'upload-1',
+        [1, 3],
+      );
+      expect(result).toEqual({
+        expiresInSeconds: 3600,
+        urls: [
+          { partNumber: 1, url: 'http://storage/1' },
+          { partNumber: 3, url: 'http://storage/3' },
+        ],
+      });
+    });
+
+    it('should throw VideoNotFoundException when the video is unknown or not owned', async () => {
+      videosRepository.findOwnedByPublicId.mockResolvedValue(null);
+
+      await expect(
+        service.getPartUrls(USER_ID, 'AbCdEfGh_-1', { partNumbers: [1] }),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+      expect(storage.presignUploadPartUrls).not.toHaveBeenCalled();
+    });
+
+    it.each([VideoStatus.PROCESSING, VideoStatus.READY, VideoStatus.ERROR])(
+      'should throw VideoNotInDraftException when the video is %s',
+      async (status) => {
+        videosRepository.findOwnedByPublicId.mockResolvedValue(
+          buildVideo({ status, upload_id: 'upload-1', part_count: 3 }),
+        );
+
+        await expect(
+          service.getPartUrls(USER_ID, 'AbCdEfGh_-1', { partNumbers: [1] }),
+        ).rejects.toBeInstanceOf(VideoNotInDraftException);
+      },
+    );
+
+    it('should throw InvalidPartNumberException when a part number exceeds the part count', async () => {
+      await expect(
+        service.getPartUrls(USER_ID, 'AbCdEfGh_-1', { partNumbers: [1, 4] }),
+      ).rejects.toBeInstanceOf(InvalidPartNumberException);
+      expect(storage.presignUploadPartUrls).not.toHaveBeenCalled();
+    });
+
+    it('should accept the last part number equal to the part count', async () => {
+      await expect(
+        service.getPartUrls(USER_ID, 'AbCdEfGh_-1', { partNumbers: [3] }),
+      ).resolves.toBeDefined();
     });
   });
 });

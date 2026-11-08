@@ -1,4 +1,11 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -11,6 +18,8 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
 import { CreateVideoResponseDto } from './dto/create-video-response.dto';
 import { CreateVideoDto } from './dto/create-video.dto';
+import { PartUrlsRequestDto } from './dto/part-urls-request.dto';
+import { PartUrlsResponseDto } from './dto/part-urls-response.dto';
 import { VideosService } from './videos.service';
 
 @ApiTags('videos')
@@ -51,5 +60,46 @@ export class VideosController {
     @Body() dto: CreateVideoDto,
   ): Promise<CreateVideoResponseDto> {
     return this.videosService.createDraft(user.sub, dto);
+  }
+
+  @Post(':publicId/upload/part-urls')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Get presigned URLs for upload parts',
+    description:
+      'Returns presigned UploadPart URLs for the requested part numbers of a draft video owned by the caller. The client PUTs the raw bytes of each part to its URL and keeps the ETag response header.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Presigned part URLs',
+    type: PartUrlsResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation failed or part number out of range',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found (unknown or owned by another channel)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video is not in draft status',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async getPartUrls(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: PartUrlsRequestDto,
+  ): Promise<PartUrlsResponseDto> {
+    return this.videosService.getPartUrls(user.sub, publicId, dto);
   }
 }

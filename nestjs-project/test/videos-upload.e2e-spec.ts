@@ -8,6 +8,7 @@ import { AppModule } from '../src/app.module';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import { Video } from '../src/videos/entities/video.entity';
+import { VideoStatus } from '../src/videos/video-status.enum';
 import { cleanAllTables } from '../src/test/create-test-data-source';
 import {
   type AuthenticatedTestUser,
@@ -166,6 +167,124 @@ describe('Videos upload (e2e)', () => {
         .expect(404);
 
       expect(response.body).toMatchObject({ error: 'CHANNEL_NOT_FOUND' });
+    });
+  });
+
+  async function createDraft(sizeBytes = 150 * MIB): Promise<string> {
+    const response = await authorized(
+      request(app.getHttpServer()).post('/videos'),
+    )
+      .send({ filename: 'aula.mp4', contentType: 'video/mp4', sizeBytes })
+      .expect(201);
+    const { publicId } = response.body as { publicId: string };
+    createdKeys.push(`videos/${publicId}/original.mp4`);
+    return publicId;
+  }
+
+  describe('POST /videos/:publicId/upload/part-urls', () => {
+    it('should return presigned URLs that accept part bytes and expose the ETag', async () => {
+      const publicId = await createDraft();
+
+      const response = await authorized(
+        request(app.getHttpServer()).post(
+          `/videos/${publicId}/upload/part-urls`,
+        ),
+      )
+        .send({ partNumbers: [1, 2] })
+        .expect(200);
+
+      const body = response.body as {
+        expiresInSeconds: number;
+        urls: { partNumber: number; url: string }[];
+      };
+      expect(body.expiresInSeconds).toBe(3600);
+      expect(body.urls.map((entry) => entry.partNumber)).toEqual([1, 2]);
+      const put = await fetch(body.urls[0].url, {
+        method: 'PUT',
+        body: new Blob([new Uint8Array(1024)]),
+      });
+      expect(put.ok).toBe(true);
+      expect(put.headers.get('etag')).toBeTruthy();
+    });
+
+    it('should reject a part number above the part count', async () => {
+      const publicId = await createDraft();
+
+      const response = await authorized(
+        request(app.getHttpServer()).post(
+          `/videos/${publicId}/upload/part-urls`,
+        ),
+      )
+        .send({ partNumbers: [4] })
+        .expect(400);
+
+      expect(response.body).toMatchObject({ error: 'INVALID_PART_NUMBER' });
+    });
+
+    it.each([
+      ['empty list', []],
+      ['duplicates', [1, 1]],
+      ['part zero', [0]],
+    ])(
+      'should reject %s with VALIDATION_ERROR',
+      async (_label, partNumbers) => {
+        const publicId = await createDraft();
+
+        const response = await authorized(
+          request(app.getHttpServer()).post(
+            `/videos/${publicId}/upload/part-urls`,
+          ),
+        )
+          .send({ partNumbers })
+          .expect(400);
+
+        expect(response.body).toMatchObject({ error: 'VALIDATION_ERROR' });
+      },
+    );
+
+    it('should answer the same 404 for an unknown video and for a video of another channel', async () => {
+      const publicId = await createDraft();
+      const stranger = await registerConfirmAndLogin(app, dataSource);
+
+      const unknown = await authorized(
+        request(app.getHttpServer()).post(
+          '/videos/doesnotexist/upload/part-urls',
+        ),
+      )
+        .send({ partNumbers: [1] })
+        .expect(404);
+      const foreign = await request(app.getHttpServer())
+        .post(`/videos/${publicId}/upload/part-urls`)
+        .set('Authorization', `Bearer ${stranger.access_token}`)
+        .send({ partNumbers: [1] })
+        .expect(404);
+
+      expect(unknown.body).toEqual(foreign.body);
+      expect(foreign.body).toMatchObject({ error: 'VIDEO_NOT_FOUND' });
+    });
+
+    it('should answer 409 VIDEO_NOT_IN_DRAFT when the video left draft', async () => {
+      const publicId = await createDraft();
+      await dataSource
+        .getRepository(Video)
+        .update({ public_id: publicId }, { status: VideoStatus.PROCESSING });
+
+      const response = await authorized(
+        request(app.getHttpServer()).post(
+          `/videos/${publicId}/upload/part-urls`,
+        ),
+      )
+        .send({ partNumbers: [1] })
+        .expect(409);
+
+      expect(response.body).toMatchObject({ error: 'VIDEO_NOT_IN_DRAFT' });
+    });
+
+    it('should reject a request without token', async () => {
+      await request(app.getHttpServer())
+        .post('/videos/AbCdEfGh_-1/upload/part-urls')
+        .send({ partNumbers: [1] })
+        .expect(401);
     });
   });
 });
