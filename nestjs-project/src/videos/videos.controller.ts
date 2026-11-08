@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Redirect,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -16,6 +17,7 @@ import {
 } from '@nestjs/swagger';
 import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
 import { CompleteUploadResponseDto } from './dto/complete-upload-response.dto';
 import { CompleteUploadDto } from './dto/complete-upload.dto';
@@ -191,5 +193,75 @@ export class VideosController {
     @Param('publicId') publicId: string,
   ): Promise<VideoResponseDto> {
     return this.videosService.getOwnedVideo(user.sub, publicId);
+  }
+
+  @Public()
+  @Get(':publicId/stream')
+  @Redirect()
+  @ApiOperation({
+    summary: 'Stream a ready video',
+    description:
+      'Public. Redirects (302) to a short-lived presigned URL of the video file; the storage serves Range requests (206) so playback starts without downloading the whole file. Only videos in ready status are available.',
+  })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to the presigned stream URL',
+    headers: {
+      Location: {
+        description: 'Presigned URL, valid for 1 hour',
+        schema: { type: 'string' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video is not ready',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async stream(
+    @Param('publicId') publicId: string,
+  ): Promise<{ url: string; statusCode: number }> {
+    const url = await this.videosService.getStreamUrl(publicId);
+    return { url, statusCode: HttpStatus.FOUND };
+  }
+
+  @Public()
+  @Get(':publicId/download')
+  @Redirect()
+  @ApiOperation({
+    summary: 'Download a ready video',
+    description:
+      'Public. Redirects (302) to a short-lived presigned URL that makes the storage answer with Content-Disposition attachment and a filename derived from the video title. Only videos in ready status are available.',
+  })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to the presigned download URL',
+    headers: {
+      Location: {
+        description: 'Presigned URL, valid for 1 hour',
+        schema: { type: 'string' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video is not ready',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async download(
+    @Param('publicId') publicId: string,
+  ): Promise<{ url: string; statusCode: number }> {
+    const url = await this.videosService.getDownloadUrl(publicId);
+    return { url, statusCode: HttpStatus.FOUND };
   }
 }

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { extname } from 'node:path';
 import { DataSource } from 'typeorm';
 import { ChannelsService } from '../channels/channels.service';
 import {
@@ -9,6 +10,7 @@ import {
   UploadCompletionFailedException,
   VideoNotFoundException,
   VideoNotInDraftException,
+  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { VideoProcessingProducer } from '../queue/video-processing.producer';
 import { InvalidMultipartUploadError } from '../storage/storage.errors';
@@ -23,6 +25,10 @@ import type { PartUrlsRequestDto } from './dto/part-urls-request.dto';
 import type { PartUrlsResponseDto } from './dto/part-urls-response.dto';
 import type { VideoResponseDto } from './dto/video-response.dto';
 import type { Video } from './entities/video.entity';
+import {
+  buildContentDisposition,
+  buildDownloadFilename,
+} from './download-filename.util';
 import { planUploadParts } from './upload-plan.util';
 import { deriveTitle } from './video-title.util';
 import { VideoStatus } from './video-status.enum';
@@ -161,6 +167,37 @@ export class VideosService {
       createdAt: video.created_at.toISOString(),
       updatedAt: video.updated_at.toISOString(),
     };
+  }
+
+  async getStreamUrl(publicId: string): Promise<string> {
+    const video = await this.findReadyVideo(publicId);
+    return this.storage.presignPublicGetUrl(video.storage_key, {
+      expiresIn: PRESIGNED_URL_TTL_SECONDS,
+    });
+  }
+
+  async getDownloadUrl(publicId: string): Promise<string> {
+    const video = await this.findReadyVideo(publicId);
+    const filename = buildDownloadFilename(
+      video.title,
+      extname(video.storage_key).slice(1),
+      video.original_filename,
+    );
+    return this.storage.presignPublicGetUrl(video.storage_key, {
+      expiresIn: PRESIGNED_URL_TTL_SECONDS,
+      responseContentDisposition: buildContentDisposition(filename),
+    });
+  }
+
+  private async findReadyVideo(publicId: string): Promise<Video> {
+    const video = await this.videosRepository.findByPublicId(publicId);
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+    if (video.status !== VideoStatus.READY) {
+      throw new VideoNotReadyException();
+    }
+    return video;
   }
 
   private async completeStorageUpload(

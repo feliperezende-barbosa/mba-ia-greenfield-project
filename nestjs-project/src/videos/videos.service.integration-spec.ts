@@ -16,6 +16,7 @@ import {
   UploadCompletionFailedException,
   VideoNotFoundException,
   VideoNotInDraftException,
+  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { Channel } from '../channels/entities/channel.entity';
 import storageConfig from '../config/storage.config';
@@ -477,6 +478,97 @@ describe('VideosService (integration)', () => {
       await expect(
         service.getOwnedVideo(other.user_id, draft.publicId),
       ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+  });
+
+  describe('getStreamUrl / getDownloadUrl', () => {
+    const content = Buffer.from(
+      Array.from({ length: 2048 }, (_value, index) => index % 251),
+    );
+
+    async function createReadyVideo(title: string): Promise<Video> {
+      const channel = await createTestChannel(dataSource);
+      const draft = await service.createDraft(channel.user_id, {
+        filename: 'aula.mp4',
+        contentType: 'video/mp4',
+        sizeBytes: MIB,
+        title,
+      });
+      const video = await dataSource
+        .getRepository(Video)
+        .findOneByOrFail({ public_id: draft.publicId });
+      createdKeys.push(video.storage_key);
+      await storage.putObject(video.storage_key, content, 'video/mp4');
+      await dataSource
+        .getRepository(Video)
+        .update({ id: video.id }, { status: VideoStatus.READY });
+      return video;
+    }
+
+    it('should return a stream URL that serves 206 with Content-Range for a Range request', async () => {
+      const video = await createReadyVideo('Minha aula');
+
+      const url = await service.getStreamUrl(video.public_id);
+
+      const publicEndpoint = new URL(process.env.S3_PUBLIC_ENDPOINT!);
+      expect(new URL(url).host).toBe(publicEndpoint.host);
+      const response = await fetch(url, { headers: { Range: 'bytes=0-99' } });
+      expect(response.status).toBe(206);
+      expect(response.headers.get('content-range')).toBe(
+        `bytes 0-99/${content.length}`,
+      );
+      const body = Buffer.from(await response.arrayBuffer());
+      expect(body).toHaveLength(100);
+      expect(body).toEqual(content.subarray(0, 100));
+    });
+
+    it('should return a download URL with an attachment disposition and the original bytes', async () => {
+      const video = await createReadyVideo('Minha aula');
+
+      const response = await fetch(
+        await service.getDownloadUrl(video.public_id),
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-disposition')).toBe(
+        `attachment; filename="Minha aula.mp4"; filename*=UTF-8''Minha%20aula.mp4`,
+      );
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(content);
+    });
+
+    it('should strip slashes, backslashes and quotes of the title from the download filename', async () => {
+      const video = await createReadyVideo('a/b\\c "d"');
+
+      const response = await fetch(
+        await service.getDownloadUrl(video.public_id),
+      );
+
+      expect(response.headers.get('content-disposition')).toContain(
+        'filename="a_b_c _d_.mp4"',
+      );
+    });
+
+    it.each([VideoStatus.DRAFT, VideoStatus.PROCESSING, VideoStatus.ERROR])(
+      'should refuse stream and download of a %s video',
+      async (status) => {
+        const video = await createReadyVideo('Minha aula');
+        await dataSource
+          .getRepository(Video)
+          .update({ id: video.id }, { status });
+
+        await expect(
+          service.getStreamUrl(video.public_id),
+        ).rejects.toBeInstanceOf(VideoNotReadyException);
+        await expect(
+          service.getDownloadUrl(video.public_id),
+        ).rejects.toBeInstanceOf(VideoNotReadyException);
+      },
+    );
+
+    it('should throw VideoNotFoundException for an unknown video', async () => {
+      await expect(service.getStreamUrl('doesnotexist')).rejects.toBeInstanceOf(
+        VideoNotFoundException,
+      );
     });
   });
 });

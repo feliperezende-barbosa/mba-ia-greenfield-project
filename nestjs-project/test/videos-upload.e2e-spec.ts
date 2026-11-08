@@ -549,4 +549,74 @@ describe('Videos upload (e2e)', () => {
       await request(app.getHttpServer()).get('/videos/AbCdEfGh_-1').expect(401);
     });
   });
+
+  describe('GET /videos/:publicId/stream and /download', () => {
+    async function createVideo(status: VideoStatus): Promise<string> {
+      const created = await authorized(
+        request(app.getHttpServer()).post('/videos'),
+      )
+        .send({
+          filename: 'aula.mp4',
+          contentType: 'video/mp4',
+          sizeBytes: MIB,
+          title: 'Minha aula',
+        })
+        .expect(201);
+      const { publicId } = created.body as { publicId: string };
+      createdKeys.push(`videos/${publicId}/original.mp4`);
+      await dataSource
+        .getRepository(Video)
+        .update({ public_id: publicId }, { status });
+      return publicId;
+    }
+
+    it.each(['stream', 'download'])(
+      'should redirect %s of a ready video to the public storage endpoint without a token',
+      async (route) => {
+        const publicId = await createVideo(VideoStatus.READY);
+
+        const response = await request(app.getHttpServer())
+          .get(`/videos/${publicId}/${route}`)
+          .expect(302);
+
+        const location = response.headers.location;
+        expect(location.startsWith(process.env.S3_PUBLIC_ENDPOINT!)).toBe(true);
+        expect(location).toContain(`videos/${publicId}/original.mp4`);
+        expect(location.includes('response-content-disposition')).toBe(
+          route === 'download',
+        );
+      },
+    );
+
+    it.each([
+      ['stream', VideoStatus.DRAFT],
+      ['stream', VideoStatus.PROCESSING],
+      ['download', VideoStatus.ERROR],
+    ])(
+      'should answer 409 VIDEO_NOT_READY for %s of a %s video',
+      async (route, status) => {
+        const publicId = await createVideo(status);
+
+        const response = await request(app.getHttpServer())
+          .get(`/videos/${publicId}/${route}`)
+          .expect(409);
+
+        expect(response.body).toMatchObject({
+          statusCode: 409,
+          error: 'VIDEO_NOT_READY',
+        });
+      },
+    );
+
+    it.each(['stream', 'download'])(
+      'should answer 404 VIDEO_NOT_FOUND for %s of an unknown video',
+      async (route) => {
+        const response = await request(app.getHttpServer())
+          .get(`/videos/doesnotexist/${route}`)
+          .expect(404);
+
+        expect(response.body).toMatchObject({ error: 'VIDEO_NOT_FOUND' });
+      },
+    );
+  });
 });

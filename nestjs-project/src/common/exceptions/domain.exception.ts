@@ -67,6 +67,12 @@ export class VideoNotInDraftException extends DomainException {
   }
 }
 
+export class VideoNotReadyException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_READY', 409, 'Video is not ready');
+  }
+}
+
 export class InvalidPartNumberException extends DomainException {
   constructor() {
     super('INVALID_PART_NUMBER', 400, 'Part number is out of range');

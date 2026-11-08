@@ -10,6 +10,7 @@ import {
   UploadCompletionFailedException,
   VideoNotFoundException,
   VideoNotInDraftException,
+  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { VideoProcessingProducer } from '../queue/video-processing.producer';
 import { InvalidMultipartUploadError } from '../storage/storage.errors';
@@ -44,6 +45,7 @@ describe('VideosService', () => {
       | 'setUploadId'
       | 'deleteById'
       | 'findOwnedByPublicId'
+      | 'findByPublicId'
       | 'transition'
     >
   >;
@@ -68,6 +70,7 @@ describe('VideosService', () => {
       setUploadId: jest.fn().mockResolvedValue(undefined),
       deleteById: jest.fn().mockResolvedValue(undefined),
       findOwnedByPublicId: jest.fn(),
+      findByPublicId: jest.fn(),
       transition: jest.fn().mockResolvedValue(true),
     };
     storage = {
@@ -563,5 +566,96 @@ describe('VideosService', () => {
         service.getOwnedVideo(USER_ID, 'AbCdEfGh_-1'),
       ).rejects.toBeInstanceOf(VideoNotFoundException);
     });
+  });
+
+  describe('getStreamUrl / getDownloadUrl', () => {
+    const ready = buildVideo({
+      status: VideoStatus.READY,
+      title: 'Minha aula',
+      original_filename: 'aula-original.mp4',
+    });
+
+    beforeEach(() => {
+      videosRepository.findByPublicId.mockResolvedValue(ready);
+      storage.presignPublicGetUrl.mockResolvedValue('http://storage/signed');
+    });
+
+    it('should presign the original object for a ready video without ownership scope', async () => {
+      const url = await service.getStreamUrl('AbCdEfGh_-1');
+
+      expect(url).toBe('http://storage/signed');
+      expect(videosRepository.findByPublicId).toHaveBeenCalledWith(
+        'AbCdEfGh_-1',
+      );
+      expect(storage.presignPublicGetUrl).toHaveBeenCalledWith(
+        'videos/AbCdEfGh_-1/original.mp4',
+        { expiresIn: 3600 },
+      );
+    });
+
+    it('should presign the download with an attachment disposition built from the title', async () => {
+      const url = await service.getDownloadUrl('AbCdEfGh_-1');
+
+      expect(url).toBe('http://storage/signed');
+      expect(storage.presignPublicGetUrl).toHaveBeenCalledWith(
+        'videos/AbCdEfGh_-1/original.mp4',
+        {
+          expiresIn: 3600,
+          responseContentDisposition:
+            'attachment; filename="Minha aula.mp4"; filename*=UTF-8\'\'Minha%20aula.mp4',
+        },
+      );
+    });
+
+    it('should fall back to the original filename when the title is blank', async () => {
+      videosRepository.findByPublicId.mockResolvedValue({
+        ...ready,
+        title: ' ',
+      } as Video);
+
+      await service.getDownloadUrl('AbCdEfGh_-1');
+
+      expect(storage.presignPublicGetUrl).toHaveBeenCalledWith(
+        'videos/AbCdEfGh_-1/original.mp4',
+        expect.objectContaining({
+          responseContentDisposition: expect.stringContaining(
+            'filename="aula-original.mp4"',
+          ) as string,
+        }),
+      );
+    });
+
+    it.each(['getStreamUrl', 'getDownloadUrl'] as const)(
+      '%s should throw VideoNotFoundException for an unknown video',
+      async (method) => {
+        videosRepository.findByPublicId.mockResolvedValue(null);
+
+        await expect(service[method]('nope')).rejects.toBeInstanceOf(
+          VideoNotFoundException,
+        );
+        expect(storage.presignPublicGetUrl).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['getStreamUrl', VideoStatus.DRAFT],
+      ['getStreamUrl', VideoStatus.PROCESSING],
+      ['getStreamUrl', VideoStatus.ERROR],
+      ['getDownloadUrl', VideoStatus.DRAFT],
+      ['getDownloadUrl', VideoStatus.PROCESSING],
+      ['getDownloadUrl', VideoStatus.ERROR],
+    ] as const)(
+      '%s should throw VideoNotReadyException when the video is %s',
+      async (method, status) => {
+        videosRepository.findByPublicId.mockResolvedValue(
+          buildVideo({ status }),
+        );
+
+        await expect(service[method]('AbCdEfGh_-1')).rejects.toBeInstanceOf(
+          VideoNotReadyException,
+        );
+        expect(storage.presignPublicGetUrl).not.toHaveBeenCalled();
+      },
+    );
   });
 });

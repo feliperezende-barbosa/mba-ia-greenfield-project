@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 10/13 completed
+**SIs:** 11/13 completed
 
 ### SI-03.1 — Infra: ffmpeg, MinIO, Redis, dependências, configuração e suporte de testes
 - **Status:** completed
@@ -104,9 +104,13 @@
   - The integration test stores a synthetic JPEG-signature buffer as the thumbnail (content-type and byte equality asserted); the real worker-generated JPEG is verified in the SI-03.12 pipeline E2E.
 
 ### SI-03.11 — Streaming e download (GET /videos/:publicId/stream e /download)
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** `download-filename.util.spec.ts` 9, `videos.service.spec.ts` + stream/download block, `videos.service.integration-spec.ts` + 7 (real MinIO: `Range: bytes=0-99` → 206 with `Content-Range: bytes 0-99/2048` and the 100 first bytes; download → `Content-Disposition: attachment` + identical bytes; title `a/b\c "d"` → `a_b_c _d_.mp4`; draft/processing/error → `VideoNotReadyException`); `src/videos` 9 suites / 112 tests passing; `test/videos-upload.e2e-spec.ts` 38/38 passing (+7 controller cases: 302 without token with `Location` on `S3_PUBLIC_ENDPOINT`, 409 `VIDEO_NOT_READY`, 404)
+- **Observations:**
+  - The download extension is taken from the stored `storage_key` (`extname`), which was itself derived from the content-type allow-list at draft time, so it never comes from client strings.
+  - The sanitiser keeps Unicode letters/numbers (`\p{L}\p{N}`) — the plan's "letters/numbers" is read as Unicode-aware; non-ASCII characters appear only percent-encoded in `filename*` and as `_` in the ASCII `filename=` fallback. A blank title falls back to `original_filename` (which `buildContentDisposition` also sanitises, since it is arbitrary client input).
+  - Stream/download routes carry `@Public()` and no `@ApiBearerAuth`; the 302 response documents the `Location` header.
+  - Controller e2e cases are an addition to the plan's Tests table (controllers are covered through e2e only).
 
 ### SI-03.12 — Pipeline ponta a ponta: upload, worker, streaming e download (E2E)
 - **Status:** pending
