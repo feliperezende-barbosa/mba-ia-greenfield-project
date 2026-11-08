@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 3/13 completed
+**SIs:** 4/13 completed
 
 ### SI-03.1 — Infra: ffmpeg, MinIO, Redis, dependências, configuração e suporte de testes
 - **Status:** completed
@@ -37,9 +37,13 @@
   - Confirmed against real MinIO: with `requestChecksumCalculation: 'WHEN_REQUIRED'` presigned part URLs carry no `x-amz-checksum-*` / `x-amz-sdk-checksum-algorithm`, the `PUT` is accepted and `ETag` is readable; ranged presigned GET returns `206`; `ResponseContentDisposition` is reflected.
 
 ### SI-03.4 — QueueModule e produtor do job de processamento
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 9/9 passing (video-processing.producer.spec.ts, video-processing.producer.integration-spec.ts, queue.module.integration-spec.ts)
+- **Observations:**
+  - Plan gap: with an unreachable Redis `queue.add()` never rejects — BullMQ's `Queue.waitUntilReady()` waits for the connection while ioredis retries forever (verified: the test timed out and left Jest hanging). To satisfy the criterion "com o Redis inacessível a publicação rejeita com erro", `VideoProcessingProducer.enqueue` bounds the wait with `ENQUEUE_TIMEOUT_MS = 5000` (constant in `video-processing.constants.ts`) and rejects with an Error on timeout; the orphaned `add()` promise gets a no-op `.catch` so it cannot become an unhandled rejection (a late successful add is harmless: the consumer only acts on `processing` videos). Covered by a fake-timer unit test and a real unreachable-Redis integration test (takes ~5 s).
+  - `QueueModule` configures `BullModule.forRootAsync` with `imports: [ConfigModule.forFeature(queueConfig)]`, so it does not require a global `ConfigModule`; it exports `BullModule` and `VideoProcessingProducer`. It is not imported by any module yet (first consumer: SI-03.7).
+  - The unreachable-Redis integration test silences `console.error` (BullMQ logs each refused connection) and Jest prints "did not exit one second after the test run" for that suite because the retrying connection's timer outlives `module.close()`; the process exits by itself a few seconds later. Calling `queue.disconnect()` before closing made Jest hang, so it was not used.
+  - `removeOnComplete` / `removeOnFail` counts are named constants (`VIDEO_PROCESSING_REMOVE_ON_COMPLETE_COUNT` = 1000, `VIDEO_PROCESSING_REMOVE_ON_FAIL_COUNT` = 5000) beyond the four constants listed in the plan.
 
 ### SI-03.5 — Pré-cadastro do vídeo como rascunho (POST /videos)
 - **Status:** pending

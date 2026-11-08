@@ -1,0 +1,7 @@
+export const VIDEO_PROCESSING_QUEUE = 'video-processing';
+export const PROCESS_VIDEO_JOB = 'process-video';
+export const PROCESS_VIDEO_ATTEMPTS = 3;
+export const PROCESS_VIDEO_BACKOFF_DELAY_MS = 5000;
+export const VIDEO_PROCESSING_REMOVE_ON_COMPLETE_COUNT = 1000;
+export const VIDEO_PROCESSING_REMOVE_ON_FAIL_COUNT = 5000;
+export const ENQUEUE_TIMEOUT_MS = 5000;
