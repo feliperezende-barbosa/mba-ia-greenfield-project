@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 2/13 completed
+**SIs:** 3/13 completed
 
 ### SI-03.1 — Infra: ffmpeg, MinIO, Redis, dependências, configuração e suporte de testes
 - **Status:** completed
@@ -27,9 +27,14 @@
   - `createDraft` saves with `{ transaction: false }` (TypeORM `save` otherwise wraps in a transaction); the unique-violation check matches code `23505` with `(public_id)` in the driver detail; `createDraft` input uses snake_case keys (`channel_id`, `original_filename`, `content_type`, `part_count`) mirroring the entity.
 
 ### SI-03.3 — StorageModule e StorageService (S3/MinIO)
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 26/26 passing (storage.service.integration-spec.ts, storage.service.spec.ts, storage.module.spec.ts)
+- **Observations:**
+  - `StorageModule` imports `ConfigModule.forFeature(storageConfig)` so it is self-contained (no global ConfigModule required in test modules). It is not yet imported by `AppModule`/`VideosModule` (first consumer is SI-03.5), so the "bucket exists at application start" criterion is verified through `module.init()` (`onModuleInit` → `ensureBucket`) in the integration test, which also confirmed the `streamtube` bucket on the real MinIO.
+  - `ensureBucket()` is public (called by `onModuleInit`) and additionally tolerates `BucketAlreadyOwnedByYou` on `CreateBucket` (race between API and worker starting together); every other error propagates.
+  - `onModuleDestroy` destroys both S3 clients to avoid open handles in Jest.
+  - `presignUploadPartUrls` returns `{ partNumber, url }[]` (matches the `part-urls` response contract); `completeMultipartUpload` takes `{ partNumber, etag }[]`; `putPartsViaPresignedUrls(urls, bodies: Map<number, Buffer>)` returns the `{ partNumber, etag }[]` to feed completion.
+  - Confirmed against real MinIO: with `requestChecksumCalculation: 'WHEN_REQUIRED'` presigned part URLs carry no `x-amz-checksum-*` / `x-amz-sdk-checksum-algorithm`, the `PUT` is accepted and `ETag` is readable; ranged presigned GET returns `206`; `ResponseContentDisposition` is reflected.
 
 ### SI-03.4 — QueueModule e produtor do job de processamento
 - **Status:** pending
