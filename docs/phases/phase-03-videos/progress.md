@@ -106,3 +106,9 @@
 
 - `npx tsc --noEmit` exit 0; full `npx jest --runInBand` 35 suites / 219 tests passing; `npm run test:e2e` 3 suites / 52 tests passing.
 - `npm run lint` does not exit 0: ~160 pre-existing errors (type-aware `no-unsafe-*` rules) in files untouched by this batch (`auth.service*.spec.ts`, `channels.service*.ts`, `mail.service.integration-spec.ts`, `domain-exception.filter.spec.ts`, `test/auth.e2e-spec.ts`, …) plus `Function` in `src/test/create-test-data-source.ts`. Files created/changed by SI-03.1–03.4 are lint-clean; the pre-existing ones were left alone (out of scope). `npm run lint` (with `--fix`) changed nothing.
+
+## Batch verification (SI-03.5 – SI-03.7)
+
+- `npx tsc --noEmit` exit 0; full `npx jest --runInBand` 39 suites / 272 tests passing; `npm run test:e2e` 4 suites / 80 tests passing.
+- `test/jest-e2e.json` now sets `"maxWorkers": 1`: with two DB-using e2e suites (`auth` and `videos-upload`) Jest ran them in parallel and their `cleanAllTables` calls clobbered each other (29 failures); serial execution fixes it.
+- Files created/changed by SI-03.5–03.7 are lint-clean (`eslint` on `src/videos`, the new e2e, `domain.exception.ts`); `channels.service.ts` keeps its pre-existing `no-unsafe-*` errors (untouched code).
