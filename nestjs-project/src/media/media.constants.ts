@@ -1,0 +1,10 @@
+export const FFPROBE_BIN = 'ffprobe';
+export const FFMPEG_BIN = 'ffmpeg';
+export const PROBE_TIMEOUT_MS = 60_000;
+export const THUMBNAIL_TIMEOUT_MS = 120_000;
+export const PROBE_MAX_BUFFER_BYTES = 10 * 1024 ** 2;
+export const THUMBNAIL_MAX_BUFFER_BYTES = 20 * 1024 ** 2;
+export const THUMBNAIL_WIDTH = 1280;
+export const THUMBNAIL_MAX_OFFSET_SECONDS = 10;
+export const THUMBNAIL_OFFSET_RATIO = 0.1;
+export const INVALID_DATA_MARKER = 'Invalid data found when processing input';

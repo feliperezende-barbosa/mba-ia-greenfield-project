@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 7/13 completed
+**SIs:** 8/13 completed
 
 ### SI-03.1 — Infra: ffmpeg, MinIO, Redis, dependências, configuração e suporte de testes
 - **Status:** completed
@@ -73,9 +73,14 @@
   - Parts are forwarded to `CompleteMultipartUpload` in the order the client sent them (an out-of-order list yields `InvalidPartOrder` → `422 UPLOAD_COMPLETION_FAILED`, as the Error Catalog states).
 
 ### SI-03.8 — MediaModule: metadados com ffprobe e thumbnail com ffmpeg
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 34/34 passing (media.service.spec.ts 24, media.service.integration-spec.ts 10)
+- **Observations:**
+  - `execFile` is wrapped in a callback-based `run()` (not `util.promisify`) so unit tests can mock `node:child_process` and so `stderr` is available to classify errors. Classification: `Invalid data found when processing input` in stderr (ffprobe or ffmpeg) or no video stream / unparsable JSON / empty thumbnail output → `InvalidMediaError`; timeout (`killed`), HTTP errors (e.g. `404`), spawn failure and `maxBuffer` overflow → plain `Error` (retriable).
+  - `probe` falls back to the video stream `duration` when `format.duration` is absent; `container` is the ffprobe `format_name` (e.g. `mov,mp4,m4a,3gp,3g2,mj2`); `-ss` is formatted with 3 decimals.
+  - Timeouts are instance fields (`probeTimeoutMs`, `thumbnailTimeoutMs`, defaulting to the constants) so the integration spec shortens them to 500 ms and proves, with a local HTTP server that never answers, that a hung ffprobe/ffmpeg is SIGKILLed and the call rejects (validation note: a stalled process must not leave a video stuck).
+  - `src/test/media-fixtures.ts` generates all fixtures with `ffmpeg -f lavfi` in an OS temp dir (removed in `afterAll`); the ≥ 11 MiB MP4 is a 5 s noisy `libx264 -crf 0` clip, and the helper throws if the result is smaller than 11 MiB.
+  - No module-compilation test was added for `MediaModule` (single provider, no configured imports; DI wiring is exercised by the integration spec).
 
 ### SI-03.9 — Video worker: processor BullMQ, idempotência e tratamento de falha
 - **Status:** pending
