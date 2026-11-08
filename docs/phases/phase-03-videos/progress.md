@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 6/13 completed
+**SIs:** 7/13 completed
 
 ### SI-03.1 — Infra: ffmpeg, MinIO, Redis, dependências, configuração e suporte de testes
 - **Status:** completed
@@ -63,9 +63,14 @@
   - A draft with `upload_id = null` (impossible through the API, since the response is only sent after `setUploadId`) throws a plain `Error` (500) instead of a domain error.
 
 ### SI-03.7 — Conclusão do upload e publicação do job (POST /videos/:publicId/upload/completion)
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 32/32 passing (videos.service.spec.ts completeUpload block 15, videos.service.integration-spec.ts completeUpload block 5, test/videos-upload.e2e-spec.ts completion block 12)
+- **Observations:**
+  - Integration tests need `QueueModule` (real Redis) with a unique `QUEUE_PREFIX` per suite; the earlier createDraft/getPartUrls blocks of the same file now run against that module too. The e2e file also uses a unique `QUEUE_PREFIX` and obliterates the queue.
+  - A multipart of 2 parts needs a declared `sizeBytes` > 64 MiB (`64 MiB + 1` plans 2 parts); the declared size only plans the parts, the uploaded bytes (5 MiB + 1 MiB) are smaller, and `size_bytes` persists the real `HeadObject` length. MinIO accepts a single 0-byte part, so the `EMPTY_FILE` path is exercised end to end (integration + E2E).
+  - The 10 GiB limit (`FILE_TOO_LARGE`, 413) is covered structurally in the unit test (`headObject` mocked at 10 GiB + 1 and exactly 10 GiB accepted), per `TD-09`.
+  - After a failed `HeadObject` that finds no object right after a successful `CompleteMultipartUpload` the service throws `UPLOAD_COMPLETION_FAILED` (defensive; not in the plan). The `ENQUEUE_FAILED` cause is logged with Nest `Logger` before the compensation (the domain exception carries only the catalog message); the detail is stored in `error_message`.
+  - Parts are forwarded to `CompleteMultipartUpload` in the order the client sent them (an out-of-order list yields `InvalidPartOrder` → `422 UPLOAD_COMPLETION_FAILED`, as the Error Catalog states).
 
 ### SI-03.8 — MediaModule: metadados com ffprobe e thumbnail com ffmpeg
 - **Status:** pending

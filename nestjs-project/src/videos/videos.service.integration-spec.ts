@@ -1,18 +1,31 @@
 import { ListMultipartUploadsCommand, type S3Client } from '@aws-sdk/client-s3';
+import { getQueueToken } from '@nestjs/bullmq';
 import { ConfigModule, type ConfigType } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import type { Queue } from 'bullmq';
+import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { ChannelsService } from '../channels/channels.service';
 import {
+  EmptyFileException,
+  EnqueueFailedException,
   InvalidPartNumberException,
+  UploadCompletionFailedException,
   VideoNotFoundException,
   VideoNotInDraftException,
 } from '../common/exceptions/domain.exception';
 import { Channel } from '../channels/entities/channel.entity';
 import storageConfig from '../config/storage.config';
+import {
+  PROCESS_VIDEO_JOB,
+  VIDEO_PROCESSING_QUEUE,
+} from '../queue/video-processing.constants';
+import { QueueModule } from '../queue/queue.module';
+import { VideoProcessingProducer } from '../queue/video-processing.producer';
+import type { ProcessVideoJobData } from '../queue/video-processing.types';
 import { S3_INTERNAL_CLIENT } from '../storage/storage.constants';
 import { StorageModule } from '../storage/storage.module';
 import { StorageService } from '../storage/storage.service';
@@ -40,9 +53,13 @@ describe('VideosService (integration)', () => {
   let service: VideosService;
   let storage: StorageService;
   let bucket: string;
+  let queue: Queue<ProcessVideoJobData>;
+  let producer: VideoProcessingProducer;
+  const originalQueuePrefix = process.env.QUEUE_PREFIX;
   const createdKeys: string[] = [];
 
   beforeAll(async () => {
+    process.env.QUEUE_PREFIX = `test-videos-service-${randomUUID()}`;
     dataSource = createTestDataSource(ALL_ENTITIES);
     await dataSource.initialize();
 
@@ -50,6 +67,7 @@ describe('VideosService (integration)', () => {
       imports: [
         ConfigModule.forRoot({ ignoreEnvFile: true, load: [storageConfig] }),
         StorageModule,
+        QueueModule,
       ],
       providers: [
         VideosService,
@@ -66,6 +84,8 @@ describe('VideosService (integration)', () => {
 
     service = module.get(VideosService);
     storage = module.get(StorageService);
+    producer = module.get(VideoProcessingProducer);
+    queue = module.get(getQueueToken(VIDEO_PROCESSING_QUEUE));
     bucket = module.get<ConfigType<typeof storageConfig>>(
       storageConfig.KEY,
     ).bucket;
@@ -73,12 +93,19 @@ describe('VideosService (integration)', () => {
 
   afterAll(async () => {
     await deleteKeys(storage, createdKeys);
+    await queue.obliterate({ force: true });
     await module.close();
     await dataSource.destroy();
+    if (originalQueuePrefix === undefined) {
+      delete process.env.QUEUE_PREFIX;
+    } else {
+      process.env.QUEUE_PREFIX = originalQueuePrefix;
+    }
   });
 
   beforeEach(async () => {
     await cleanAllTables(dataSource);
+    await queue.obliterate({ force: true });
   });
 
   afterEach(() => {
@@ -249,6 +276,148 @@ describe('VideosService (integration)', () => {
           partNumbers: [1],
         }),
       ).rejects.toBeInstanceOf(VideoNotInDraftException);
+    });
+  });
+
+  describe('completeUpload', () => {
+    // The declared size only plans the parts: 64 MiB + 1 byte plans 2 parts.
+    async function createTwoPartDraft(userId: string): Promise<string> {
+      const draft = await service.createDraft(userId, {
+        filename: 'aula.mp4',
+        contentType: 'video/mp4',
+        sizeBytes: 64 * MIB + 1,
+      });
+      createdKeys.push(`videos/${draft.publicId}/original.mp4`);
+      return draft.publicId;
+    }
+
+    async function uploadParts(
+      userId: string,
+      publicId: string,
+      sizes: number[],
+    ): Promise<{ partNumber: number; etag: string }[]> {
+      const partNumbers = sizes.map((_size, index) => index + 1);
+      const { urls } = await service.getPartUrls(userId, publicId, {
+        partNumbers,
+      });
+      const bodies = new Map(
+        sizes.map((size, index) => [index + 1, Buffer.alloc(size, index + 1)]),
+      );
+      return putPartsViaPresignedUrls(urls, bodies);
+    }
+
+    async function findVideo(publicId: string): Promise<Video> {
+      return dataSource
+        .getRepository(Video)
+        .findOneByOrFail({ public_id: publicId });
+    }
+
+    async function objectExists(key: string): Promise<boolean> {
+      return (await storage.headObject(key)) !== null;
+    }
+
+    it('should move to processing with the real size and publish the job with the video uuid', async () => {
+      const channel = await createTestChannel(dataSource);
+      const publicId = await createTwoPartDraft(channel.user_id);
+      const parts = await uploadParts(channel.user_id, publicId, [
+        5 * MIB,
+        MIB,
+      ]);
+
+      const result = await service.completeUpload(channel.user_id, publicId, {
+        parts,
+      });
+
+      expect(result).toEqual({
+        publicId,
+        status: VideoStatus.PROCESSING,
+      });
+      const video = await findVideo(publicId);
+      expect(video.status).toBe(VideoStatus.PROCESSING);
+      expect(video.size_bytes).toBe(6 * MIB);
+      expect(await objectExists(video.storage_key)).toBe(true);
+      const job = await queue.getJob(video.id);
+      expect(job).toBeDefined();
+      expect(job!.name).toBe(PROCESS_VIDEO_JOB);
+      expect(job!.data).toEqual({ videoId: video.id, publicId });
+    });
+
+    it('should reject a repeated completion without publishing a second job', async () => {
+      const channel = await createTestChannel(dataSource);
+      const publicId = await createTwoPartDraft(channel.user_id);
+      const parts = await uploadParts(channel.user_id, publicId, [
+        5 * MIB,
+        MIB,
+      ]);
+      await service.completeUpload(channel.user_id, publicId, { parts });
+
+      await expect(
+        service.completeUpload(channel.user_id, publicId, { parts }),
+      ).rejects.toBeInstanceOf(VideoNotInDraftException);
+
+      const counts = await queue.getJobCounts('waiting', 'active', 'delayed');
+      expect(counts.waiting).toBe(1);
+    });
+
+    it('should keep the draft when an ETag is invalid so the client can retry', async () => {
+      const channel = await createTestChannel(dataSource);
+      const publicId = await createTwoPartDraft(channel.user_id);
+      const parts = await uploadParts(channel.user_id, publicId, [
+        5 * MIB,
+        MIB,
+      ]);
+
+      await expect(
+        service.completeUpload(channel.user_id, publicId, {
+          parts: [parts[0], { partNumber: 2, etag: '"deadbeef"' }],
+        }),
+      ).rejects.toBeInstanceOf(UploadCompletionFailedException);
+
+      expect((await findVideo(publicId)).status).toBe(VideoStatus.DRAFT);
+      await expect(
+        service.completeUpload(channel.user_id, publicId, { parts }),
+      ).resolves.toMatchObject({ status: VideoStatus.PROCESSING });
+    });
+
+    it('should mark an empty object as error and remove it from the storage', async () => {
+      const channel = await createTestChannel(dataSource);
+      const draft = await service.createDraft(channel.user_id, {
+        filename: 'empty.mp4',
+        contentType: 'video/mp4',
+        sizeBytes: MIB,
+      });
+      createdKeys.push(`videos/${draft.publicId}/original.mp4`);
+      const parts = await uploadParts(channel.user_id, draft.publicId, [0]);
+
+      await expect(
+        service.completeUpload(channel.user_id, draft.publicId, { parts }),
+      ).rejects.toBeInstanceOf(EmptyFileException);
+
+      const video = await findVideo(draft.publicId);
+      expect(video.status).toBe(VideoStatus.ERROR);
+      expect(video.error_message).toMatch(/^EMPTY_FILE/);
+      expect(await objectExists(video.storage_key)).toBe(false);
+      expect(await queue.getJob(video.id)).toBeUndefined();
+    });
+
+    it('should mark the video as error with ENQUEUE_FAILED when publishing fails', async () => {
+      const channel = await createTestChannel(dataSource);
+      const publicId = await createTwoPartDraft(channel.user_id);
+      const parts = await uploadParts(channel.user_id, publicId, [
+        5 * MIB,
+        MIB,
+      ]);
+      jest
+        .spyOn(producer, 'enqueue')
+        .mockRejectedValue(new Error('redis down'));
+
+      await expect(
+        service.completeUpload(channel.user_id, publicId, { parts }),
+      ).rejects.toBeInstanceOf(EnqueueFailedException);
+
+      const video = await findVideo(publicId);
+      expect(video.status).toBe(VideoStatus.ERROR);
+      expect(video.error_message).toMatch(/^ENQUEUE_FAILED/);
     });
   });
 });

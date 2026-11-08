@@ -72,3 +72,31 @@ export class InvalidPartNumberException extends DomainException {
     super('INVALID_PART_NUMBER', 400, 'Part number is out of range');
   }
 }
+
+export class UploadCompletionFailedException extends DomainException {
+  constructor() {
+    super(
+      'UPLOAD_COMPLETION_FAILED',
+      422,
+      'Multipart upload could not be completed',
+    );
+  }
+}
+
+export class FileTooLargeException extends DomainException {
+  constructor() {
+    super('FILE_TOO_LARGE', 413, 'File exceeds the 10 GiB limit');
+  }
+}
+
+export class EmptyFileException extends DomainException {
+  constructor() {
+    super('EMPTY_FILE', 422, 'Uploaded file is empty');
+  }
+}
+
+export class EnqueueFailedException extends DomainException {
+  constructor() {
+    super('ENQUEUE_FAILED', 503, 'Video processing could not be scheduled');
+  }
+}
