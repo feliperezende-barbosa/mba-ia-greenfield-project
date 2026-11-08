@@ -484,4 +484,69 @@ describe('Videos upload (e2e)', () => {
         .expect(401);
     });
   });
+
+  describe('GET /videos/:publicId', () => {
+    it('should return the draft to its owner without internal fields', async () => {
+      const created = await authorized(
+        request(app.getHttpServer()).post('/videos'),
+      )
+        .send({
+          filename: 'aula.mp4',
+          contentType: 'video/mp4',
+          sizeBytes: MIB,
+        })
+        .expect(201);
+      const { publicId } = created.body as { publicId: string };
+      createdKeys.push(`videos/${publicId}/original.mp4`);
+
+      const response = await authorized(
+        request(app.getHttpServer()).get(`/videos/${publicId}`),
+      ).expect(200);
+
+      expect(response.body).toEqual({
+        publicId,
+        title: 'aula',
+        status: 'draft',
+        originalFilename: 'aula.mp4',
+        contentType: 'video/mp4',
+        sizeBytes: null,
+        durationSeconds: null,
+        metadata: null,
+        errorMessage: null,
+        thumbnailUrl: null,
+        createdAt: expect.any(String) as string,
+        updatedAt: expect.any(String) as string,
+      });
+    });
+
+    it('should answer the same 404 for an unknown video and for a video of another channel', async () => {
+      const created = await authorized(
+        request(app.getHttpServer()).post('/videos'),
+      )
+        .send({
+          filename: 'aula.mp4',
+          contentType: 'video/mp4',
+          sizeBytes: MIB,
+        })
+        .expect(201);
+      const { publicId } = created.body as { publicId: string };
+      createdKeys.push(`videos/${publicId}/original.mp4`);
+      const stranger = await registerConfirmAndLogin(app, dataSource);
+
+      const unknown = await authorized(
+        request(app.getHttpServer()).get('/videos/doesnotexist'),
+      ).expect(404);
+      const foreign = await request(app.getHttpServer())
+        .get(`/videos/${publicId}`)
+        .set('Authorization', `Bearer ${stranger.access_token}`)
+        .expect(404);
+
+      expect(unknown.body).toEqual(foreign.body);
+      expect(foreign.body).toMatchObject({ error: 'VIDEO_NOT_FOUND' });
+    });
+
+    it('should reject a request without token', async () => {
+      await request(app.getHttpServer()).get('/videos/AbCdEfGh_-1').expect(401);
+    });
+  });
 });

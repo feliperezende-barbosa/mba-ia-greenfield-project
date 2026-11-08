@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 9/13 completed
+**SIs:** 10/13 completed
 
 ### SI-03.1 — Infra: ffmpeg, MinIO, Redis, dependências, configuração e suporte de testes
 - **Status:** completed
@@ -96,9 +96,12 @@
   - Known caveat (not changed): `nest-cli.json` has `deleteOutDir: true` and both the API (`start:dev`) and the worker (`start:worker:dev`) compile into the same `dist/` through the shared mounted volume; concurrently starting two watch builds can briefly wipe each other's output. Not an issue for tests (ts-jest) or when only one of them is running; a separate `outDir` for the worker is a candidate follow-up.
 
 ### SI-03.10 — Leitura do vídeo pelo dono (GET /videos/:publicId)
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 46/46 passing in `videos.service.spec.ts` (+5 `getOwnedVideo`) and `videos.service.integration-spec.ts` (+2: presigned thumbnail downloads the stored JPEG bytes from the `S3_PUBLIC_ENDPOINT` host; non-owner → `VideoNotFoundException`); `test/videos-upload.e2e-spec.ts` 31/31 passing (+3 for `GET /videos/:publicId`)
+- **Observations:**
+  - The previous private `VideosService.getOwnedVideo` (returning the entity, used by `getOwnedDraft`) was renamed to `findOwnedVideo`; the public `getOwnedVideo(userId, publicId)` now builds the `VideoResponseDto` as the plan names it.
+  - Not in the plan's Tests table: three controller-level e2e cases (draft projection without internal fields, identical 404 for unknown/foreign, 401) added to the existing `test/videos-upload.e2e-spec.ts` because controllers are tested through e2e only (testing guide).
+  - The integration test stores a synthetic JPEG-signature buffer as the thumbnail (content-type and byte equality asserted); the real worker-generated JPEG is verified in the SI-03.12 pipeline E2E.
 
 ### SI-03.11 — Streaming e download (GET /videos/:publicId/stream e /download)
 - **Status:** pending

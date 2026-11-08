@@ -21,6 +21,7 @@ import type { CompleteUploadResponseDto } from './dto/complete-upload-response.d
 import type { CreateVideoDto } from './dto/create-video.dto';
 import type { PartUrlsRequestDto } from './dto/part-urls-request.dto';
 import type { PartUrlsResponseDto } from './dto/part-urls-response.dto';
+import type { VideoResponseDto } from './dto/video-response.dto';
 import type { Video } from './entities/video.entity';
 import { planUploadParts } from './upload-plan.util';
 import { deriveTitle } from './video-title.util';
@@ -135,6 +136,33 @@ export class VideosService {
     return { publicId: video.public_id, status: VideoStatus.PROCESSING };
   }
 
+  async getOwnedVideo(
+    userId: string,
+    publicId: string,
+  ): Promise<VideoResponseDto> {
+    const video = await this.findOwnedVideo(userId, publicId);
+    const thumbnailUrl = video.thumbnail_key
+      ? await this.storage.presignPublicGetUrl(video.thumbnail_key, {
+          expiresIn: PRESIGNED_URL_TTL_SECONDS,
+        })
+      : null;
+
+    return {
+      publicId: video.public_id,
+      title: video.title,
+      status: video.status,
+      originalFilename: video.original_filename,
+      contentType: video.content_type,
+      sizeBytes: video.size_bytes,
+      durationSeconds: video.duration_seconds,
+      metadata: video.metadata,
+      errorMessage: video.error_message,
+      thumbnailUrl,
+      createdAt: video.created_at.toISOString(),
+      updatedAt: video.updated_at.toISOString(),
+    };
+  }
+
   private async completeStorageUpload(
     video: Video,
     parts: CompletedPartInput[],
@@ -210,7 +238,7 @@ export class VideosService {
   }
 
   // Unknown video and video of another channel are indistinguishable on purpose.
-  private async getOwnedVideo(
+  private async findOwnedVideo(
     userId: string,
     publicId: string,
   ): Promise<Video> {
@@ -229,7 +257,7 @@ export class VideosService {
     userId: string,
     publicId: string,
   ): Promise<Video> {
-    const video = await this.getOwnedVideo(userId, publicId);
+    const video = await this.findOwnedVideo(userId, publicId);
     if (video.status !== VideoStatus.DRAFT) {
       throw new VideoNotInDraftException();
     }

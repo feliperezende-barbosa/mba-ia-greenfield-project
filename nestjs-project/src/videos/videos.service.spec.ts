@@ -55,6 +55,7 @@ describe('VideosService', () => {
       | 'completeMultipartUpload'
       | 'headObject'
       | 'deleteObject'
+      | 'presignPublicGetUrl'
     >
   >;
   let producer: jest.Mocked<Pick<VideoProcessingProducer, 'enqueue'>>;
@@ -75,6 +76,7 @@ describe('VideosService', () => {
       completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
       headObject: jest.fn().mockResolvedValue({ contentLength: 10 * MIB }),
       deleteObject: jest.fn().mockResolvedValue(undefined),
+      presignPublicGetUrl: jest.fn(),
     };
     producer = { enqueue: jest.fn().mockResolvedValue(undefined) };
     channelsService = {
@@ -442,6 +444,124 @@ describe('VideosService', () => {
       ).rejects.toBeInstanceOf(VideoNotInDraftException);
       expect(storage.completeMultipartUpload).not.toHaveBeenCalled();
       expect(producer.enqueue).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getOwnedVideo', () => {
+    const createdAt = new Date('2026-01-01T10:00:00.000Z');
+    const updatedAt = new Date('2026-01-01T10:05:00.000Z');
+    const base = {
+      title: 'aula',
+      original_filename: 'aula.mp4',
+      content_type: 'video/mp4',
+      created_at: createdAt,
+      updated_at: updatedAt,
+      size_bytes: null,
+      duration_seconds: null,
+      metadata: null,
+      thumbnail_key: null,
+      error_message: null,
+    };
+
+    it('should project a draft with null processing fields and no thumbnail', async () => {
+      videosRepository.findOwnedByPublicId.mockResolvedValue(
+        buildVideo({ ...base, status: VideoStatus.DRAFT }),
+      );
+
+      const result = await service.getOwnedVideo(USER_ID, 'AbCdEfGh_-1');
+
+      expect(videosRepository.findOwnedByPublicId).toHaveBeenCalledWith(
+        'AbCdEfGh_-1',
+        CHANNEL_ID,
+      );
+      expect(result).toEqual({
+        publicId: 'AbCdEfGh_-1',
+        title: 'aula',
+        status: 'draft',
+        originalFilename: 'aula.mp4',
+        contentType: 'video/mp4',
+        sizeBytes: null,
+        durationSeconds: null,
+        metadata: null,
+        errorMessage: null,
+        thumbnailUrl: null,
+        createdAt: '2026-01-01T10:00:00.000Z',
+        updatedAt: '2026-01-01T10:05:00.000Z',
+      });
+      expect(storage.presignPublicGetUrl).not.toHaveBeenCalled();
+    });
+
+    it('should project a ready video with duration, metadata and a presigned thumbnail', async () => {
+      const metadata = {
+        container: 'mov,mp4,m4a,3gp,3g2,mj2',
+        width: 320,
+        height: 240,
+        video_codec: 'h264',
+        audio_codec: 'aac',
+        bit_rate: 120000,
+        size_bytes: 1000,
+      };
+      videosRepository.findOwnedByPublicId.mockResolvedValue(
+        buildVideo({
+          ...base,
+          status: VideoStatus.READY,
+          size_bytes: 1000,
+          duration_seconds: 3,
+          metadata,
+          thumbnail_key: 'videos/AbCdEfGh_-1/thumbnail.jpg',
+        }),
+      );
+      storage.presignPublicGetUrl.mockResolvedValue('http://storage/thumb');
+
+      const result = await service.getOwnedVideo(USER_ID, 'AbCdEfGh_-1');
+
+      expect(storage.presignPublicGetUrl).toHaveBeenCalledWith(
+        'videos/AbCdEfGh_-1/thumbnail.jpg',
+        { expiresIn: 3600 },
+      );
+      expect(result).toMatchObject({
+        status: 'ready',
+        sizeBytes: 1000,
+        durationSeconds: 3,
+        metadata,
+        thumbnailUrl: 'http://storage/thumb',
+      });
+    });
+
+    it('should expose the failure reason of a video in error', async () => {
+      videosRepository.findOwnedByPublicId.mockResolvedValue(
+        buildVideo({
+          ...base,
+          status: VideoStatus.ERROR,
+          error_message: 'INVALID_MEDIA: no video stream',
+        }),
+      );
+
+      const result = await service.getOwnedVideo(USER_ID, 'AbCdEfGh_-1');
+
+      expect(result.status).toBe('error');
+      expect(result.errorMessage).toBe('INVALID_MEDIA: no video stream');
+      expect(result.thumbnailUrl).toBeNull();
+    });
+
+    it('should not leak internal storage fields', async () => {
+      videosRepository.findOwnedByPublicId.mockResolvedValue(
+        buildVideo({ ...base, upload_id: 'upload-1' }),
+      );
+
+      const result = await service.getOwnedVideo(USER_ID, 'AbCdEfGh_-1');
+
+      expect(result).not.toHaveProperty('storage_key');
+      expect(result).not.toHaveProperty('thumbnail_key');
+      expect(result).not.toHaveProperty('upload_id');
+    });
+
+    it('should throw VideoNotFoundException when the video is unknown or not owned', async () => {
+      videosRepository.findOwnedByPublicId.mockResolvedValue(null);
+
+      await expect(
+        service.getOwnedVideo(USER_ID, 'AbCdEfGh_-1'),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
     });
   });
 });

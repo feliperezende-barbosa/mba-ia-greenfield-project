@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
@@ -22,6 +23,7 @@ import { CreateVideoResponseDto } from './dto/create-video-response.dto';
 import { CreateVideoDto } from './dto/create-video.dto';
 import { PartUrlsRequestDto } from './dto/part-urls-request.dto';
 import { PartUrlsResponseDto } from './dto/part-urls-response.dto';
+import { VideoResponseDto } from './dto/video-response.dto';
 import { VideosService } from './videos.service';
 
 @ApiTags('videos')
@@ -160,5 +162,34 @@ export class VideosController {
     @Body() dto: CompleteUploadDto,
   ): Promise<CompleteUploadResponseDto> {
     return this.videosService.completeUpload(user.sub, publicId, dto);
+  }
+
+  @Get(':publicId')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Get a video owned by the caller',
+    description:
+      'Returns the video in any status, with duration, metadata, failure reason and a presigned thumbnail URL when available. Videos owned by other channels are reported as not found.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'The video',
+    type: VideoResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found (unknown or owned by another channel)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async getOwnedVideo(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ): Promise<VideoResponseDto> {
+    return this.videosService.getOwnedVideo(user.sub, publicId);
   }
 }

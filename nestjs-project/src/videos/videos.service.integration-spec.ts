@@ -420,4 +420,63 @@ describe('VideosService (integration)', () => {
       expect(video.error_message).toMatch(/^ENQUEUE_FAILED/);
     });
   });
+
+  describe('getOwnedVideo', () => {
+    it('should return a thumbnailUrl that downloads the stored thumbnail from the public endpoint', async () => {
+      const channel = await createTestChannel(dataSource);
+      const draft = await service.createDraft(channel.user_id, {
+        filename: 'aula.mp4',
+        contentType: 'video/mp4',
+        sizeBytes: MIB,
+      });
+      const thumbnailKey = `videos/${draft.publicId}/thumbnail.jpg`;
+      createdKeys.push(`videos/${draft.publicId}/original.mp4`, thumbnailKey);
+      const jpeg = Buffer.concat([
+        Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+        Buffer.alloc(64, 7),
+      ]);
+      await storage.putObject(thumbnailKey, jpeg, 'image/jpeg');
+      await dataSource.getRepository(Video).update(
+        { public_id: draft.publicId },
+        {
+          status: VideoStatus.READY,
+          duration_seconds: 3,
+          thumbnail_key: thumbnailKey,
+        },
+      );
+
+      const result = await service.getOwnedVideo(
+        channel.user_id,
+        draft.publicId,
+      );
+
+      expect(result.status).toBe(VideoStatus.READY);
+      expect(result.durationSeconds).toBe(3);
+      const publicEndpoint = new URL(process.env.S3_PUBLIC_ENDPOINT!);
+      expect(new URL(result.thumbnailUrl!).host).toBe(publicEndpoint.host);
+      const response = await fetch(result.thumbnailUrl!);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('image/jpeg');
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(jpeg);
+    });
+
+    it('should return null thumbnailUrl for a draft and hide videos of other channels', async () => {
+      const owner = await createTestChannel(dataSource);
+      const other = await createTestChannel(dataSource);
+      const draft = await service.createDraft(owner.user_id, {
+        filename: 'aula.mp4',
+        contentType: 'video/mp4',
+        sizeBytes: MIB,
+      });
+      createdKeys.push(`videos/${draft.publicId}/original.mp4`);
+
+      const result = await service.getOwnedVideo(owner.user_id, draft.publicId);
+
+      expect(result.status).toBe(VideoStatus.DRAFT);
+      expect(result.thumbnailUrl).toBeNull();
+      await expect(
+        service.getOwnedVideo(other.user_id, draft.publicId),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+  });
 });
