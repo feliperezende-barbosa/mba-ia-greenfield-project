@@ -12,6 +12,48 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_started
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  minio:
+    image: chainguard/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_API_CORS_ALLOW_ORIGIN=${MINIO_API_CORS_ALLOW_ORIGIN:-*}
+      - MINIO_API_STALE_UPLOADS_EXPIRY=24h
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /minio/health/live HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          read -r status <&3 &&
+          [[ "$$status" == *" 200 "* ]]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory-policy noeviction
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   db:
     image: postgres:17
@@ -34,3 +76,5 @@ services:
       - "8025:8025"
 
 
+volumes:
+  minio-data:
