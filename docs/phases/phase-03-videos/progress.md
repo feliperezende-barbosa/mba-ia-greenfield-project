@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
-**Status:** in_progress
-**SIs:** 12/13 completed
+**Status:** completed
+**SIs:** 13/13 completed
 
 ### SI-03.1 — Infra: ffmpeg, MinIO, Redis, dependências, configuração e suporte de testes
 - **Status:** completed
@@ -123,9 +123,17 @@
   - New `src/test/worker-test-helpers.ts` (`startTestWorker`, `waitForVideoStatus`); lint-clean, `tsc --noEmit` exit 0.
 
 ### SI-03.13 — Contrato OpenAPI, exemplos `api.http` e documentação
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** `src/openapi-export.integration-spec.ts` 29/29 passing (+20: for each of the six `/videos` operations — summary + description, `access-token` security only on the protected ones, every error response referencing `ApiErrorEnvelope`; 302 + `Location` header on stream/download; `VideoResponseDto` schema without storage fields)
+- **Observations:**
+  - `openapi.json` regenerated with `npm run openapi:export` (+680 lines: the six `/videos` paths and their DTO schemas; earlier SIs had not regenerated it).
+  - `api.http`: new section "VÍDEOS" (steps 10–16: draft, part-urls, part `PUT` to `S3_PUBLIC_ENDPOINT`, completion, owner `GET`, stream, download), reusing `@accessToken`; `@publicId`/`@partUrl` are captured from request variables and the part `ETag` must be copied from the `PUT` response header into `@partETag` (documented in the file). The same sequence was executed for real with `curl` against the running API (`npm run start` in `nestjs-api`), MinIO on `localhost:9000` and the Compose `video-worker`: draft → `PUT` → completion (`202`) → stream `409` while `processing` → `ready` (duration 4 s, h264 320×240, thumbnail URL on `localhost:9000`) → stream `302` → `Range: bytes=0-99` `206` + `Content-Range: bytes 0-99/58798` → download `200` with `Content-Disposition: attachment; filename="Meu primeiro v_deo.mp4"; filename*=UTF-8''Meu%20primeiro%20v%C3%ADdeo.mp4` and a byte-identical file. The test user, rows and objects created were removed afterwards.
+  - Docs: `CLAUDE.md` (root: architecture bullets, `S3_PUBLIC_ENDPOINT` exception to the Docker-host rule, short "Videos (Phase 03)" section) and `nestjs-project/CLAUDE.md` (readiness checks for Redis/MinIO, services `minio`/`redis`/`video-worker`, worker commands and scale, `docker compose build` after `Dockerfile.dev` changes, build output/`dist-worker`, Test Type Selection mentions MinIO/Redis/ffmpeg, new "Videos" section with module layout, endpoints, status lifecycle, upload handshake, queue/worker, env vars and real-infrastructure test conventions). Every cited file/script was checked to exist. `docs/diagrams/software-arch.mermaid`: queue technology `TBD` → `BullMQ / Redis`. `docs/project-plan.md` has no Phase 03 diagram note to change.
+
+## Batch verification (SI-03.10 – SI-03.13 and worker build isolation)
+
+- `npx tsc --noEmit` exit 0; full `npx jest --runInBand` 45 suites / 388 tests passing; `npm run test:e2e` 5 suites / 93 tests passing (while the Compose `video-worker` was up); `npm run build` ok; the Compose `video-worker` stayed up across the builds.
+- `npm run lint` still fails only on pre-existing Phase 02 files; the only error among the files touched by this batch is the old `Function` type in `src/test/create-test-data-source.ts` (not touched). `npx eslint` on `src/videos`, `src/video-worker`, `src/test` (except that file), `src/openapi-export.integration-spec.ts`, `src/common/exceptions` and the two video e2e specs is clean.
 
 ## Batch verification (SI-03.1 – SI-03.4)
 

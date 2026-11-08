@@ -14,6 +14,13 @@
 @confirmationToken = <token do e-mail de confirmacao>
 @resetToken = <token do e-mail de reset>
 
+# Vídeos — fluxo de upload (seção VÍDEOS no fim do arquivo)
+# @publicId e @partUrl são capturados dos responses de "10" e "11"
+@publicId = {{createVideo.response.body.$.publicId}}
+@partUrl = {{partUrls.response.body.$.urls[0].url}}
+# O ETag NÃO vem no body: copie o header ETag da resposta do PUT ("12") para cá
+@partETag = <ETag do header da resposta do PUT da parte>
+
 
 ###
 # ─────────────────────────────────────────────
@@ -118,3 +125,75 @@ Content-Type: {{contentType}}
   "token": "{{resetToken}}",
   "new_password": "new-password123"
 }
+
+
+###
+# ─────────────────────────────────────────────
+# VÍDEOS
+# ─────────────────────────────────────────────
+# Fluxo: login (4) → 10 → 11 → 12 → 13 → 14 (repetir até "ready") → 15 / 16.
+# Pré-requisitos: `docker compose up -d` (inclui minio, redis e video-worker) e um
+# usuário confirmado já logado em (4). Aqui o vídeo cabe em 1 parte (arquivo < 64 MiB);
+# arquivos maiores usam várias partes (partSize/partCount do passo 10), uma URL por parte.
+
+### 10. Pré-cadastrar o vídeo (rascunho) — inicia o upload multipart no storage
+# sizeBytes deve ser o tamanho real do arquivo (ex.: `stat -f%z video.mp4` no macOS)
+# @name createVideo
+POST {{baseUrl}}/videos
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "filename": "meu-video.mp4",
+  "contentType": "video/mp4",
+  "sizeBytes": 1048576,
+  "title": "Meu primeiro vídeo"
+}
+
+
+### 11. Obter URLs pré-assinadas das partes
+# @name partUrls
+POST {{baseUrl}}/videos/{{publicId}}/upload/part-urls
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "partNumbers": [1]
+}
+
+
+### 12. Enviar a parte 1 direto ao storage (URL pré-assinada, host S3_PUBLIC_ENDPOINT)
+# Sem Authorization: a assinatura já está na URL. Guarde o header ETag da resposta em @partETag.
+# Ajuste o caminho do arquivo abaixo para um vídeo real.
+PUT {{partUrl}}
+Content-Type: video/mp4
+
+< ./meu-video.mp4
+
+
+### 13. Concluir o upload — vídeo vai para "processing" e o job é publicado
+POST {{baseUrl}}/videos/{{publicId}}/upload/completion
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "parts": [
+    { "partNumber": 1, "etag": "{{partETag}}" }
+  ]
+}
+
+
+### 14. Consultar o vídeo (somente o dono) — repita até status "ready" ou "error"
+GET {{baseUrl}}/videos/{{publicId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 15. Streaming (público, só "ready") — 302 para a URL pré-assinada
+# Sem seguir o redirect para ver o Location; o storage responde Range/206 nessa URL.
+# @no-redirect
+GET {{baseUrl}}/videos/{{publicId}}/stream
+
+
+### 16. Download (público, só "ready") — 302 com Content-Disposition: attachment
+# @no-redirect
+GET {{baseUrl}}/videos/{{publicId}}/download
