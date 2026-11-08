@@ -125,3 +125,8 @@
 - `npx tsc --noEmit` exit 0; full `npx jest --runInBand` 39 suites / 272 tests passing; `npm run test:e2e` 4 suites / 80 tests passing.
 - `test/jest-e2e.json` now sets `"maxWorkers": 1`: with two DB-using e2e suites (`auth` and `videos-upload`) Jest ran them in parallel and their `cleanAllTables` calls clobbered each other (29 failures); serial execution fixes it.
 - Files created/changed by SI-03.5–03.7 are lint-clean (`eslint` on `src/videos`, the new e2e, `domain.exception.ts`); `channels.service.ts` keeps its pre-existing `no-unsafe-*` errors (untouched code).
+
+## Batch verification (SI-03.8 – SI-03.9)
+
+- `npx tsc --noEmit` exit 0; full `npx jest --runInBand` 44 suites / 332 tests passing; `npm run test:e2e` 4 suites / 80 tests passing — all run while the Compose `video-worker` was up and consuming the default `bull` prefix (tests use unique `QUEUE_PREFIX` values, so there was no interference).
+- Files created/changed by SI-03.8–03.9 are lint-clean (`eslint` on `src/media`, `src/video-worker`, `src/test/media-fixtures.ts`, `src/test/wait-for.ts`, `videos.repository*.ts`); the pre-existing Phase 02 lint errors remain untouched.
