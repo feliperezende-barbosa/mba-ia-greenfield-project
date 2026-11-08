@@ -16,10 +16,14 @@ const validate = (
 ) => {
   const base: Record<string, string> = { ...requiredEnv };
   omit.forEach((key) => delete base[key]);
-  return envValidationSchema.validate(
+  const result = envValidationSchema.validate(
     { ...base, ...env },
     { allowUnknown: true, abortEarly: false },
   );
+  return {
+    error: result.error,
+    value: result.value as Record<string, unknown>,
+  };
 };
 
 describe('envValidationSchema — SWAGGER_ENABLED', () => {

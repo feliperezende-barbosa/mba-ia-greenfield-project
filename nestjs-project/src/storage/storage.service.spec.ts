@@ -26,11 +26,11 @@ function s3Error(name: string, httpStatusCode?: number): Error {
 }
 
 describe('StorageService', () => {
-  let send: jest.Mock;
+  let send: jest.Mock<Promise<unknown>, [object]>;
   let service: StorageService;
 
   beforeEach(() => {
-    send = jest.fn();
+    send = jest.fn<Promise<unknown>, [object]>();
     const internalClient = { send } as unknown as S3Client;
     const publicClient = { send: jest.fn() } as unknown as S3Client;
     service = new StorageService(internalClient, publicClient, config);

@@ -46,7 +46,7 @@ describe('StorageModule', () => {
     expect(internal).not.toBe(publicClient);
     expect(internalEndpoint.hostname).toBe('minio');
     expect(publicEndpoint.hostname).toBe('localhost');
-    expect(await internal.config.forcePathStyle).toBe(true);
+    expect(internal.config.forcePathStyle).toBe(true);
     expect(await internal.config.requestChecksumCalculation()).toBe(
       'WHEN_REQUIRED',
     );

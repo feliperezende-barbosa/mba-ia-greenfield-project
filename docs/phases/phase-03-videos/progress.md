@@ -89,3 +89,8 @@
 - **Status:** pending
 - **Tests:** pending
 - **Observations:** none
+
+## Batch verification (SI-03.1 – SI-03.4)
+
+- `npx tsc --noEmit` exit 0; full `npx jest --runInBand` 35 suites / 219 tests passing; `npm run test:e2e` 3 suites / 52 tests passing.
+- `npm run lint` does not exit 0: ~160 pre-existing errors (type-aware `no-unsafe-*` rules) in files untouched by this batch (`auth.service*.spec.ts`, `channels.service*.ts`, `mail.service.integration-spec.ts`, `domain-exception.filter.spec.ts`, `test/auth.e2e-spec.ts`, …) plus `Function` in `src/test/create-test-data-source.ts`. Files created/changed by SI-03.1–03.4 are lint-clean; the pre-existing ones were left alone (out of scope). `npm run lint` (with `--fix`) changed nothing.

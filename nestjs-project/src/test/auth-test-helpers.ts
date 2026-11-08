@@ -22,7 +22,7 @@ export async function registerConfirmAndLogin(
     .post('/auth/register')
     .send({ email, password })
     .expect(201);
-  const userId: string = registerResponse.body.id;
+  const userId = (registerResponse.body as { id: string }).id;
 
   await dataSource.query(
     'UPDATE "users" SET is_confirmed = true WHERE id = $1',
@@ -35,7 +35,7 @@ export async function registerConfirmAndLogin(
     .expect(200);
 
   return {
-    access_token: loginResponse.body.access_token,
+    access_token: (loginResponse.body as { access_token: string }).access_token,
     user_id: userId,
     email,
   };
