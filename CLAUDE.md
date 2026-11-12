@@ -20,10 +20,10 @@ See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 
 - **Frontend** (Next.js) → calls API via REST, streams from Object Storage
 - **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
-- **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
+- **Video Worker** (FFmpeg) → Compose service `video-worker` (same `nestjs-project` package, standalone Nest context); consumes jobs from the queue, extracts metadata (ffprobe) and the thumbnail (ffmpeg), updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
-- **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Object Storage** (S3/MinIO) → video files and thumbnails; MinIO in Compose (`minio`, API `9000`, console `9001`)
+- **Message Queue** (BullMQ on Redis) → video processing job queue; Redis in Compose (`redis`, `6379`)
 - **Email Service** (SMTP) → account confirmation and password recovery
 
 ## Docker Networking
@@ -36,6 +36,18 @@ Inside a container, `localhost` refers to the container itself, not the host mac
 - **Wrong:** `DB_HOST=localhost`
 
 This applies to all environment variables, configuration files, and code that references service hosts.
+
+**Documented exception — `S3_PUBLIC_ENDPOINT`:** presigned URLs for streaming, download, thumbnails and part uploads are handed to the *client* (browser/HTTP client on the host), so they must be signed against a host the client can reach: `S3_PUBLIC_ENDPOINT=http://localhost:9000` (MinIO's published port). Server-to-storage traffic keeps using the Compose name (`S3_ENDPOINT=http://minio:9000`). The exception is limited to URLs delivered to clients; tests run inside the Compose network and override `S3_PUBLIC_ENDPOINT` to `http://minio:9000` (`nestjs-project/src/test/test-env.ts`) so presigned URLs are followable from the Jest process.
+
+## Videos (Phase 03)
+
+Backend only (`nestjs-project/`); frontend screens come later. Details and commands: `nestjs-project/CLAUDE.md` → "Videos".
+
+- **Endpoints** (`VideosController`, `/videos`): `POST /videos` (draft + multipart upload), `POST /videos/:publicId/upload/part-urls`, `POST /videos/:publicId/upload/completion` (202, publishes the job), `GET /videos/:publicId` (owner only; non-owner gets 404), and the public `GET /videos/:publicId/stream` and `/download` (302 to a presigned URL; `409 VIDEO_NOT_READY` unless `ready`).
+- **Status lifecycle:** `draft → processing → ready | error` (`error` is terminal in this phase).
+- **Bytes never cross the API:** the client uploads parts straight to MinIO with presigned URLs and streams/downloads from MinIO through presigned `GET` URLs (MinIO serves `Range`/`206` natively).
+- **Processing:** completion enqueues a BullMQ job (`video-processing` / `process-video`); the `video-worker` container consumes it, runs ffprobe + ffmpeg and moves the video to `ready` (duration, metadata, thumbnail) or `error`.
+- **Out of scope here (Phase 04+):** visibility (public/unlisted), listings, editing, public video pages.
 
 ## Working Principles
 

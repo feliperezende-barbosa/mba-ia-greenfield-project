@@ -48,3 +48,61 @@ export class TokenReuseDetectedException extends DomainException {
     );
   }
 }
+
+export class ChannelNotFoundException extends DomainException {
+  constructor() {
+    super('CHANNEL_NOT_FOUND', 404, 'Channel not found');
+  }
+}
+
+export class VideoNotFoundException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_FOUND', 404, 'Video not found');
+  }
+}
+
+export class VideoNotInDraftException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_IN_DRAFT', 409, 'Video is not in draft status');
+  }
+}
+
+export class VideoNotReadyException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_READY', 409, 'Video is not ready');
+  }
+}
+
+export class InvalidPartNumberException extends DomainException {
+  constructor() {
+    super('INVALID_PART_NUMBER', 400, 'Part number is out of range');
+  }
+}
+
+export class UploadCompletionFailedException extends DomainException {
+  constructor() {
+    super(
+      'UPLOAD_COMPLETION_FAILED',
+      422,
+      'Multipart upload could not be completed',
+    );
+  }
+}
+
+export class FileTooLargeException extends DomainException {
+  constructor() {
+    super('FILE_TOO_LARGE', 413, 'File exceeds the 10 GiB limit');
+  }
+}
+
+export class EmptyFileException extends DomainException {
+  constructor() {
+    super('EMPTY_FILE', 422, 'Uploaded file is empty');
+  }
+}
+
+export class EnqueueFailedException extends DomainException {
+  constructor() {
+    super('ENQUEUE_FAILED', 503, 'Video processing could not be scheduled');
+  }
+}

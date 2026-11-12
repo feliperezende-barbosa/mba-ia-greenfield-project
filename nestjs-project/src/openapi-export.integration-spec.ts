@@ -128,4 +128,130 @@ describe('exportSpec (integration)', () => {
       }
     }
   });
+
+  describe('videos endpoints', () => {
+    type Operation = Record<string, unknown>;
+    const VIDEO_OPERATIONS = [
+      { path: '/videos', method: 'post', protectedRoute: true },
+      {
+        path: '/videos/{publicId}/upload/part-urls',
+        method: 'post',
+        protectedRoute: true,
+      },
+      {
+        path: '/videos/{publicId}/upload/completion',
+        method: 'post',
+        protectedRoute: true,
+      },
+      { path: '/videos/{publicId}', method: 'get', protectedRoute: true },
+      {
+        path: '/videos/{publicId}/stream',
+        method: 'get',
+        protectedRoute: false,
+      },
+      {
+        path: '/videos/{publicId}/download',
+        method: 'get',
+        protectedRoute: false,
+      },
+    ];
+
+    function operationOf(path: string, method: string): Operation {
+      const paths = document.paths as Record<string, Record<string, Operation>>;
+      const operation = paths[path]?.[method];
+      expect(operation).toBeDefined();
+      return operation;
+    }
+
+    it.each(VIDEO_OPERATIONS)(
+      '$method $path has a summary and a description',
+      ({ path, method }) => {
+        const operation = operationOf(path, method);
+
+        expect(operation.summary).toEqual(expect.any(String));
+        expect((operation.summary as string).length).toBeGreaterThan(0);
+        expect(operation.description).toEqual(expect.any(String));
+        expect((operation.description as string).length).toBeGreaterThan(0);
+      },
+    );
+
+    it.each(VIDEO_OPERATIONS)(
+      '$method $path declares access-token security only when it is protected',
+      ({ path, method, protectedRoute }) => {
+        const security = operationOf(path, method).security as
+          | Array<Record<string, unknown>>
+          | undefined;
+
+        if (protectedRoute) {
+          expect(security?.some((req) => 'access-token' in req)).toBe(true);
+        } else {
+          expect(security).toBeUndefined();
+        }
+      },
+    );
+
+    it.each(VIDEO_OPERATIONS)(
+      '$method $path references ApiErrorEnvelope in every error response',
+      ({ path, method }) => {
+        const responses = operationOf(path, method).responses as Record<
+          string,
+          { content?: Record<string, { schema?: Record<string, unknown> }> }
+        >;
+        const errorStatuses = Object.keys(responses).filter(
+          (status) => Number(status) >= 400,
+        );
+
+        expect(errorStatuses.length).toBeGreaterThan(0);
+        for (const status of errorStatuses) {
+          expect(
+            responses[status].content?.['application/json']?.schema?.['$ref'],
+          ).toBe('#/components/schemas/ApiErrorEnvelope');
+        }
+      },
+    );
+
+    it('documents the redirect of stream and download as 302 with a Location header', () => {
+      for (const path of [
+        '/videos/{publicId}/stream',
+        '/videos/{publicId}/download',
+      ]) {
+        const responses = operationOf(path, 'get').responses as Record<
+          string,
+          { headers?: Record<string, unknown> }
+        >;
+
+        expect(responses['302']?.headers).toHaveProperty('Location');
+      }
+    });
+
+    it('documents the owner video resource with its response schema', () => {
+      const responses = operationOf('/videos/{publicId}', 'get')
+        .responses as Record<
+        string,
+        { content?: Record<string, { schema?: Record<string, unknown> }> }
+      >;
+      const components = document.components as Record<string, unknown>;
+      const schemas = components.schemas as Record<
+        string,
+        { properties: Record<string, unknown> }
+      >;
+
+      expect(responses['200'].content?.['application/json']?.schema).toEqual({
+        $ref: '#/components/schemas/VideoResponseDto',
+      });
+      expect(Object.keys(schemas['VideoResponseDto'].properties)).toEqual(
+        expect.arrayContaining([
+          'publicId',
+          'status',
+          'durationSeconds',
+          'metadata',
+          'errorMessage',
+          'thumbnailUrl',
+        ]),
+      );
+      expect(schemas['VideoResponseDto'].properties).not.toHaveProperty(
+        'storage_key',
+      );
+    });
+  });
 });
